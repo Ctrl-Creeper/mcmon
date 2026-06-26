@@ -11,9 +11,15 @@
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
   .btn{padding:6px 10px;border:1px solid #ccc;border-radius:10px;background:#fff;cursor:pointer;}
   .btn.active{border-color:#111;font-weight:700;}
-  select{padding:6px 10px;border-radius:10px;border:1px solid #ccc;}
+  .btn.danger{border-color:#c00;color:#c00;}
+  select,input{padding:6px 10px;border-radius:10px;border:1px solid #ccc;}
+  input[type=text],input[type=number]{width:110px;}
+  label{font-size:13px;color:#444;display:flex;flex-direction:column;gap:4px;}
   .muted{color:#666;font-size:13px;}
   canvas{max-width:100%;}
+  table{width:100%;border-collapse:collapse;font-size:14px;}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #eee;}
+  .err{color:#c00;font-size:13px;}
 </style>
 </head>
 <body>
@@ -21,8 +27,35 @@
 <h1>Minecraft Server Latency Monitor</h1>
 
 <div class="card">
+  <h2 style="margin-top:0">Servers</h2>
+  <table id="targetsTable">
+    <thead><tr><th>Name</th><th>Host:Port</th><th>Interval</th><th>Burst</th><th>Timeout</th><th></th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h3>Add / edit server</h3>
+  <form id="targetForm" class="row">
+    <input type="hidden" id="f_origId">
+    <label>ID<input type="text" id="f_id" required placeholder="unique-id"></label>
+    <label>Name<input type="text" id="f_name" placeholder="Display name"></label>
+    <label>Host<input type="text" id="f_host" required placeholder="mc.example.com"></label>
+    <label>Port<input type="number" id="f_port" required value="25565"></label>
+    <label>Ping period (sec)<input type="number" id="f_interval" required value="60" min="5"></label>
+    <label>Probes per burst<input type="number" id="f_burst" required value="5" min="1" max="20"></label>
+    <label>Timeout (ms)<input type="number" id="f_timeout" required value="1500" min="100"></label>
+    <label>Gap between probes (ms)<input type="number" id="f_gap" required value="1500" min="0"></label>
+    <label>Protocol version<input type="number" id="f_proto" required value="760"></label>
+    <div class="row" style="align-self:flex-end;">
+      <button class="btn" type="submit" id="f_submit">Add server</button>
+      <button class="btn" type="button" id="f_cancel" style="display:none">Cancel edit</button>
+    </div>
+  </form>
+  <div class="err" id="formErr"></div>
+</div>
+
+<div class="card">
   <div class="row">
-    <div>Target:</div>
+    <div>Viewing:</div>
     <select id="targetSelect"></select>
     <div class="row" id="rangeButtons"></div>
   </div>
@@ -31,7 +64,7 @@
 <div class="card">
   <canvas id="chart" height="100"></canvas>
   <div class="muted" style="margin-top:10px;">
-    Shaded band: min~max latency over 5 probes/minute; line: median; red bars (right axis): packet loss %.
+    Shaded band: min~max latency over the probe burst; line: median; red bars (right axis): packet loss %.
   </div>
 </div>
 
@@ -40,19 +73,126 @@ const ranges = ['1h','6h','12h','1d','7d','30d'];
 let currentRange = '1h';
 let currentTarget = null;
 let chart = null;
+let targetsCache = [];
 
 async function loadTargets() {
-  const targets = await fetch('/api/targets').then(r => r.json());
+  targetsCache = await fetch('/api/targets').then(r => r.json()) || [];
+  renderTargetsTable();
+  renderTargetSelect();
+}
+
+function renderTargetSelect() {
   const sel = document.getElementById('targetSelect');
+  const prev = currentTarget;
   sel.innerHTML = '';
-  targets.forEach(t => {
+  targetsCache.forEach(t => {
     const opt = document.createElement('option');
     opt.value = t.id;
     opt.textContent = t.name || t.id;
     sel.appendChild(opt);
   });
-  if (targets.length) currentTarget = targets[0].id;
-  sel.addEventListener('change', () => { currentTarget = sel.value; refresh(); });
+  if (targetsCache.find(t => t.id === prev)) {
+    currentTarget = prev;
+  } else {
+    currentTarget = targetsCache.length ? targetsCache[0].id : null;
+  }
+  sel.value = currentTarget || '';
+  sel.onchange = () => { currentTarget = sel.value; refresh(); };
+}
+
+function renderTargetsTable() {
+  const tbody = document.querySelector('#targetsTable tbody');
+  tbody.innerHTML = '';
+  targetsCache.forEach(t => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${escapeHtml(t.name || t.id)}</td>
+      <td>${escapeHtml(t.host)}:${t.port}</td>
+      <td>${t.interval_sec}s</td>
+      <td>${t.probes_per_burst}</td>
+      <td>${t.timeout_ms}ms</td>
+      <td><button class="btn" data-edit="${t.id}">Edit</button>
+          <button class="btn danger" data-del="${t.id}">Delete</button></td>`;
+    tbody.appendChild(tr);
+  });
+  tbody.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => fillForm(b.dataset.edit));
+  tbody.querySelectorAll('[data-del]').forEach(b => b.onclick = () => deleteTarget(b.dataset.del));
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function fillForm(id) {
+  const t = targetsCache.find(x => x.id === id);
+  if (!t) return;
+  document.getElementById('f_origId').value = t.id;
+  document.getElementById('f_id').value = t.id;
+  document.getElementById('f_name').value = t.name || '';
+  document.getElementById('f_host').value = t.host;
+  document.getElementById('f_port').value = t.port;
+  document.getElementById('f_interval').value = t.interval_sec;
+  document.getElementById('f_burst').value = t.probes_per_burst;
+  document.getElementById('f_timeout').value = t.timeout_ms;
+  document.getElementById('f_gap').value = t.probe_gap_ms;
+  document.getElementById('f_proto').value = t.protocol_version;
+  document.getElementById('f_submit').textContent = 'Save changes';
+  document.getElementById('f_cancel').style.display = '';
+}
+
+function resetForm() {
+  document.getElementById('targetForm').reset();
+  document.getElementById('f_origId').value = '';
+  document.getElementById('f_interval').value = 60;
+  document.getElementById('f_burst').value = 5;
+  document.getElementById('f_timeout').value = 1500;
+  document.getElementById('f_gap').value = 1500;
+  document.getElementById('f_proto').value = 760;
+  document.getElementById('f_submit').textContent = 'Add server';
+  document.getElementById('f_cancel').style.display = 'none';
+  document.getElementById('formErr').textContent = '';
+}
+
+document.getElementById('f_cancel').onclick = resetForm;
+
+document.getElementById('targetForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const origId = document.getElementById('f_origId').value;
+  const id = document.getElementById('f_id').value.trim();
+  const payload = {
+    id,
+    name: document.getElementById('f_name').value.trim(),
+    host: document.getElementById('f_host').value.trim(),
+    port: parseInt(document.getElementById('f_port').value, 10),
+    interval_sec: parseInt(document.getElementById('f_interval').value, 10),
+    probes_per_burst: parseInt(document.getElementById('f_burst').value, 10),
+    timeout_ms: parseInt(document.getElementById('f_timeout').value, 10),
+    probe_gap_ms: parseInt(document.getElementById('f_gap').value, 10),
+    protocol_version: parseInt(document.getElementById('f_proto').value, 10),
+  };
+
+  const url = origId ? `/api/targets/${encodeURIComponent(origId)}` : '/api/targets';
+  const method = origId ? 'PUT' : 'POST';
+  const res = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+  if (!res.ok) {
+    document.getElementById('formErr').textContent = await res.text();
+    return;
+  }
+  resetForm();
+  currentTarget = id;
+  await loadTargets();
+  await refresh();
+});
+
+async function deleteTarget(id) {
+  if (!confirm(`Delete server "${id}"? Its stored history stays in the database but the probe stops.`)) return;
+  const res = await fetch(`/api/targets/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!res.ok && res.status !== 204) {
+    alert(await res.text());
+    return;
+  }
+  await loadTargets();
+  await refresh();
 }
 
 function renderRangeButtons() {
@@ -68,7 +208,10 @@ function renderRangeButtons() {
 }
 
 async function refresh() {
-  if (!currentTarget) return;
+  if (!currentTarget) {
+    if (chart) { chart.destroy(); chart = null; }
+    return;
+  }
   const data = await fetch(`/api/series?target=${encodeURIComponent(currentTarget)}&range=${currentRange}`).then(r => r.json());
   const labels = (data || []).map(d => new Date(d.Ts * 1000).toLocaleString());
   const min = (data || []).map(d => d.Min);
@@ -101,10 +244,12 @@ async function refresh() {
 }
 
 (async () => {
+  resetForm();
   await loadTargets();
   renderRangeButtons();
   await refresh();
   setInterval(refresh, 30000);
+  setInterval(loadTargets, 60000);
 })();
 </script>
 

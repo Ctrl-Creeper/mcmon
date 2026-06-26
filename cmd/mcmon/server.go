@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/lewiswu/mc-latency-monitor/internal/store"
@@ -18,7 +19,7 @@ var rangeToSeconds = map[string]int64{
 	"1d": 24 * 3600, "7d": 7 * 24 * 3600, "30d": 30 * 24 * 3600,
 }
 
-func newMux(st *store.Store, targets []Target) *http.ServeMux {
+func newMux(st *store.Store, cs *ConfigStore, mgr *Manager) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	sub, err := fs.Sub(staticFS, "static")
@@ -28,7 +29,61 @@ func newMux(st *store.Store, targets []Target) *http.ServeMux {
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 
 	mux.HandleFunc("/api/targets", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, targets)
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(w, cs.Targets())
+		case http.MethodPost:
+			var t Target
+			if !decodeJSON(w, r, &t) {
+				return
+			}
+			saved, err := cs.Upsert(t)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			mgr.Start(saved)
+			writeJSON(w, saved)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/api/targets/", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/api/targets/")
+		if id == "" {
+			http.Error(w, "missing target id", http.StatusBadRequest)
+			return
+		}
+		switch r.Method {
+		case http.MethodPut:
+			var t Target
+			if !decodeJSON(w, r, &t) {
+				return
+			}
+			t.ID = id
+			saved, err := cs.Upsert(t)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			mgr.Start(saved) // restarts loop with new settings
+			writeJSON(w, saved)
+		case http.MethodDelete:
+			mgr.Stop(id)
+			ok, err := cs.Delete(id)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if !ok {
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
 	})
 
 	mux.HandleFunc("/api/series", func(w http.ResponseWriter, r *http.Request) {
@@ -48,6 +103,15 @@ func newMux(st *store.Store, targets []Target) *http.ServeMux {
 	})
 
 	return mux
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	defer r.Body.Close()
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		http.Error(w, "invalid JSON body: "+err.Error(), http.StatusBadRequest)
+		return false
+	}
+	return true
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

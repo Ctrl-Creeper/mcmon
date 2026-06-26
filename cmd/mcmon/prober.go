@@ -3,15 +3,83 @@ package main
 import (
 	"log"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/lewiswu/mc-latency-monitor/internal/mcping"
 	"github.com/lewiswu/mc-latency-monitor/internal/store"
 )
 
-// runProbeOnce probes a target N times and writes one aggregated sample.
+// Manager runs one independent probe loop per target, so each server can
+// have its own polling interval and loops can be started/stopped/restarted
+// individually when targets are added, edited, or removed via the API.
+type Manager struct {
+	mu    sync.Mutex
+	st    *store.Store
+	stops map[string]chan struct{}
+}
+
+func NewManager(st *store.Store) *Manager {
+	return &Manager{st: st, stops: make(map[string]chan struct{})}
+}
+
+// Sync starts loops for all given targets, stopping any loop for a target
+// that's no longer present. Call once at startup.
+func (m *Manager) Sync(targets []Target) {
+	for _, t := range targets {
+		m.Start(t)
+	}
+}
+
+// Start launches (or restarts, if already running) the probe loop for t.
+func (m *Manager) Start(t Target) {
+	m.Stop(t.ID)
+
+	stop := make(chan struct{})
+	m.mu.Lock()
+	m.stops[t.ID] = stop
+	m.mu.Unlock()
+
+	go m.loop(t, stop)
+}
+
+// Stop halts the probe loop for the given target id, if running.
+func (m *Manager) Stop(id string) {
+	m.mu.Lock()
+	stop, ok := m.stops[id]
+	if ok {
+		delete(m.stops, id)
+	}
+	m.mu.Unlock()
+	if ok {
+		close(stop)
+	}
+}
+
+func (m *Manager) loop(t Target, stop chan struct{}) {
+	runProbeOnce(m.st, t)
+
+	interval := time.Duration(t.IntervalSec) * time.Second
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			runProbeOnce(m.st, t)
+		}
+	}
+}
+
+// runProbeOnce probes a target several times (a "burst") and writes one
+// aggregated sample with min/median/max latency and packet loss.
 func runProbeOnce(st *store.Store, t Target) {
-	n := t.ProbesPerMinute
+	n := t.ProbesPerBurst
 	if n <= 0 {
 		n = 5
 	}
@@ -19,7 +87,7 @@ func runProbeOnce(st *store.Store, t Target) {
 	if timeout <= 0 {
 		timeout = 1500 * time.Millisecond
 	}
-	gap := time.Duration(t.ProbeIntervalMs) * time.Millisecond
+	gap := time.Duration(t.ProbeGapMs) * time.Millisecond
 	proto := t.ProtocolVersion
 	if proto == 0 {
 		proto = 760
@@ -61,20 +129,4 @@ func runProbeOnce(st *store.Store, t Target) {
 	} else {
 		log.Printf("%s unreachable loss=%.0f%%", t.ID, loss*100)
 	}
-}
-
-// startProbeLoop runs runProbeOnce for every target once per minute.
-func startProbeLoop(st *store.Store, targets []Target) {
-	probeAll := func() {
-		for _, t := range targets {
-			go runProbeOnce(st, t)
-		}
-	}
-	probeAll()
-	ticker := time.NewTicker(time.Minute)
-	go func() {
-		for range ticker.C {
-			probeAll()
-		}
-	}()
 }
