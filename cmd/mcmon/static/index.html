@@ -4,75 +4,103 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>MC Latency Monitor</title>
+<link rel="stylesheet" href="/style.css" />
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/hammerjs@2"></script>
-<style>
-  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;margin:0;color:#111;background:#fafafa;}
-  .wrap{max-width:1100px;margin:0 auto;padding:24px;}
-  nav{background:#fff;border-bottom:1px solid #ddd;padding:0 24px;display:flex;gap:24px;align-items:center;}
-  nav a{text-decoration:none;color:#444;padding:12px 0;font-size:15px;border-bottom:2px solid transparent;}
-  nav a.active{color:#111;font-weight:600;border-bottom-color:#111;}
-  nav .logo{font-weight:700;color:#111;font-size:16px;margin-right:12px;}
-  .card{border:1px solid #ddd;border-radius:12px;padding:16px;margin-bottom:16px;background:#fff;}
-  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
-  .btn{padding:6px 10px;border:1px solid #ccc;border-radius:10px;background:#fff;cursor:pointer;font-size:13px;}
-  .btn.active{border-color:#111;font-weight:700;}
-  select{padding:6px 10px;border-radius:10px;border:1px solid #ccc;}
-  .muted{color:#666;font-size:13px;}
-  canvas{max-width:100%;}
-</style>
 </head>
 <body>
 
 <nav>
-  <span class="logo">MCMon</span>
-  <a href="/" class="active">Graphs</a>
+  <span class="logo">⚡ MCMon</span>
+  <a href="/" class="active">Dashboard</a>
   <a href="/servers.html">Servers</a>
+  <span class="spacer"></span>
+  <button class="theme-toggle" id="themeBtn" title="Toggle theme">🌙</button>
 </nav>
 
 <div class="wrap">
 
+<!-- Summary stats -->
+<div class="stats-row" id="statsRow">
+  <div class="stat-card"><div class="stat-label">Servers</div><div class="stat-value accent" id="statServers">-</div></div>
+  <div class="stat-card"><div class="stat-label">Online</div><div class="stat-value green" id="statOnline">-</div></div>
+  <div class="stat-card"><div class="stat-label">Current Median</div><div class="stat-value" id="statMedian">-</div></div>
+  <div class="stat-card"><div class="stat-label">Avg Loss</div><div class="stat-value" id="statLoss">-</div></div>
+</div>
+
+<!-- Controls -->
 <div class="card">
   <div class="row">
-    <div>Target:</div>
     <select id="targetSelect"></select>
     <div class="row" id="rangeButtons"></div>
-    <button class="btn" id="resetZoom">Reset zoom</button>
+    <span class="spacer"></span>
+    <button class="btn ghost" id="resetZoom" title="Reset zoom">↺ Reset zoom</button>
   </div>
 </div>
 
+<!-- Chart -->
 <div class="card">
-  <canvas id="chart" height="100"></canvas>
-  <div class="muted" style="margin-top:10px;">
-    Shaded band: min~max; green line: median; red bars: loss %.
-    <strong>Scroll</strong> to zoom, <strong>drag</strong> to pan, <strong>Shift+drag</strong> to box-zoom. Double-click or button to reset.
+  <div class="chart-wrap">
+    <canvas id="chart" height="100"></canvas>
+  </div>
+  <div class="muted" style="margin-top:12px;">
+    Shaded band: min–max &nbsp;|&nbsp; Green line: median &nbsp;|&nbsp; Red bars: packet loss %.
+    &nbsp; <strong>Scroll</strong> zoom · <strong>Drag</strong> pan · <strong>Shift+drag</strong> box zoom · <strong>Double-click</strong> reset.
   </div>
 </div>
 
 </div>
 
 <script>
+// ===== Theme =====
+const themeBtn = document.getElementById('themeBtn');
+function applyTheme(dark) {
+  document.body.classList.toggle('dark', dark);
+  themeBtn.textContent = dark ? '☀️' : '🌙';
+  localStorage.setItem('mcmon-theme', dark ? 'dark' : 'light');
+}
+themeBtn.onclick = () => applyTheme(!document.body.classList.contains('dark'));
+applyTheme(localStorage.getItem('mcmon-theme') === 'dark' || (!localStorage.getItem('mcmon-theme') && matchMedia('(prefers-color-scheme:dark)').matches));
+
+// ===== State =====
 const ranges = ['1h','6h','12h','1d','7d','30d'];
 let currentRange = '1h';
 let currentTarget = null;
 let chart = null;
+let targetsCache = [];
 
+// ===== Chart colors =====
+function chartColors() {
+  const dark = document.body.classList.contains('dark');
+  return {
+    band: dark ? 'rgba(140,120,255,0.12)' : 'rgba(100,80,200,0.1)',
+    bandBorder: dark ? 'rgba(140,120,255,0.3)' : 'rgba(100,80,200,0.25)',
+    median: dark ? '#8be98b' : '#00a040',
+    loss: dark ? 'rgba(255,80,80,0.5)' : 'rgba(220,40,40,0.4)',
+    grid: dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
+    tick: dark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)',
+  };
+}
+
+// ===== Load targets =====
 async function loadTargets() {
-  const targets = await fetch('/api/targets').then(r => r.json()) || [];
+  targetsCache = await fetch('/api/targets').then(r => r.json()) || [];
+  if (!Array.isArray(targetsCache)) targetsCache = [];
   const sel = document.getElementById('targetSelect');
   const prev = currentTarget;
   sel.innerHTML = '';
-  targets.forEach(t => {
+  targetsCache.forEach(t => {
     const opt = document.createElement('option');
     opt.value = t.id;
     opt.textContent = t.name || t.id;
     sel.appendChild(opt);
   });
-  if (targets.find(t => t.id === prev)) currentTarget = prev;
-  else currentTarget = targets.length ? targets[0].id : null;
+  if (targetsCache.find(t => t.id === prev)) currentTarget = prev;
+  else currentTarget = targetsCache.length ? targetsCache[0].id : null;
   sel.value = currentTarget || '';
   sel.onchange = () => { currentTarget = sel.value; refresh(); };
+  document.getElementById('statServers').textContent = targetsCache.length;
 }
 
 function renderRangeButtons() {
@@ -90,14 +118,38 @@ function renderRangeButtons() {
 document.getElementById('resetZoom').onclick = () => { if (chart) chart.resetZoom(); };
 
 async function refresh() {
-  if (!currentTarget) { if (chart) { chart.destroy(); chart = null; } return; }
+  if (!currentTarget) {
+    if (chart) { chart.destroy(); chart = null; }
+    document.getElementById('statOnline').textContent = '-';
+    document.getElementById('statMedian').textContent = '-';
+    document.getElementById('statLoss').textContent = '-';
+    return;
+  }
   const data = await fetch(`/api/series?target=${encodeURIComponent(currentTarget)}&range=${currentRange}`).then(r => r.json());
-  const labels = (data || []).map(d => new Date(d.Ts * 1000).toLocaleString());
-  const minD = (data || []).map(d => d.Min);
-  const p50  = (data || []).map(d => d.P50);
-  const maxD = (data || []).map(d => d.Max);
-  const loss = (data || []).map(d => d.LossPct * 100);
+  const arr = data || [];
+  const labels = arr.map(d => new Date(d.Ts * 1000).toLocaleString());
+  const minD = arr.map(d => d.Min);
+  const p50  = arr.map(d => d.P50);
+  const maxD = arr.map(d => d.Max);
+  const loss = arr.map(d => d.LossPct * 100);
 
+  // Update stats
+  const lastSample = arr.length ? arr[arr.length - 1] : null;
+  if (lastSample && lastSample.P50 != null) {
+    document.getElementById('statOnline').textContent = lastSample.LossPct < 1 ? 'Yes' : 'No';
+    document.getElementById('statOnline').className = 'stat-value ' + (lastSample.LossPct < 1 ? 'green' : 'red');
+    document.getElementById('statMedian').textContent = lastSample.P50.toFixed(1) + ' ms';
+  } else {
+    document.getElementById('statOnline').textContent = 'No';
+    document.getElementById('statOnline').className = 'stat-value red';
+    document.getElementById('statMedian').textContent = '—';
+  }
+  const avgLoss = arr.length ? arr.reduce((s,d) => s + d.LossPct, 0) / arr.length * 100 : 0;
+  const lossEl = document.getElementById('statLoss');
+  lossEl.textContent = avgLoss.toFixed(1) + '%';
+  lossEl.className = 'stat-value ' + (avgLoss < 1 ? 'green' : avgLoss < 10 ? '' : 'red');
+
+  const cc = chartColors();
   const ctx = document.getElementById('chart').getContext('2d');
   if (chart) chart.destroy();
   chart = new Chart(ctx, {
@@ -105,26 +157,30 @@ async function refresh() {
     data: {
       labels,
       datasets: [
-        { label: 'max', data: maxD, borderColor: 'rgba(150,150,150,0.4)', backgroundColor: 'rgba(200,200,200,0.25)', fill: '+1', pointRadius: 0, yAxisID: 'y' },
-        { label: 'min', data: minD, borderColor: 'rgba(150,150,150,0.4)', backgroundColor: 'rgba(200,200,200,0.25)', fill: false, pointRadius: 0, yAxisID: 'y' },
-        { label: 'median', data: p50, borderColor: '#00a000', borderWidth: 2, backgroundColor: 'transparent', pointRadius: 0, yAxisID: 'y' },
-        { label: 'loss %', data: loss, type: 'bar', backgroundColor: 'rgba(255,0,0,0.4)', yAxisID: 'y1' },
+        { label: 'max', data: maxD, borderColor: cc.bandBorder, backgroundColor: cc.band, fill: '+1', pointRadius: 0, borderWidth: 1, yAxisID: 'y' },
+        { label: 'min', data: minD, borderColor: cc.bandBorder, backgroundColor: cc.band, fill: false, pointRadius: 0, borderWidth: 1, yAxisID: 'y' },
+        { label: 'median', data: p50, borderColor: cc.median, borderWidth: 2, backgroundColor: 'transparent', pointRadius: 0, tension: 0.3, yAxisID: 'y' },
+        { label: 'loss %', data: loss, type: 'bar', backgroundColor: cc.loss, borderRadius: 2, yAxisID: 'y1' },
       ]
     },
     options: {
       animation: false,
+      responsive: true,
       interaction: { mode: 'index', intersect: false },
       scales: {
-        y:  { title: { display: true, text: 'ms' }, min: 0 },
-        y1: { position: 'right', min: 0, max: 100, title: { display: true, text: 'loss %' }, grid: { drawOnChartArea: false } },
+        x: { ticks: { color: cc.tick, maxTicksLimit: 12, font: { size: 11 } }, grid: { color: cc.grid } },
+        y: { title: { display: true, text: 'ms', color: cc.tick, font: { size: 12 } }, min: 0, ticks: { color: cc.tick, font: { size: 11 } }, grid: { color: cc.grid } },
+        y1: { position: 'right', min: 0, max: 100, title: { display: true, text: 'loss %', color: cc.tick, font: { size: 12 } }, ticks: { color: cc.tick, font: { size: 11 } }, grid: { drawOnChartArea: false } },
       },
       plugins: {
+        legend: { labels: { color: cc.tick, font: { size: 12 }, usePointStyle: true, pointStyle: 'circle' } },
+        tooltip: { backgroundColor: 'rgba(0,0,0,0.8)', titleFont: { size: 12 }, bodyFont: { size: 12 }, cornerRadius: 8, padding: 10 },
         zoom: {
           pan: { enabled: true, mode: 'x' },
           zoom: {
             wheel: { enabled: true, speed: 0.05 },
             pinch: { enabled: true },
-            drag: { enabled: true, backgroundColor: 'rgba(0,128,0,0.1)', borderColor: '#00a000', borderWidth: 1, modifierKey: 'shift' },
+            drag: { enabled: true, backgroundColor: 'rgba(100,80,200,0.08)', borderColor: 'rgba(100,80,200,0.3)', borderWidth: 1, modifierKey: 'shift' },
             mode: 'x',
           },
         },

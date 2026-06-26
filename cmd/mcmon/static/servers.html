@@ -4,82 +4,62 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Servers - MC Latency Monitor</title>
-<style>
-  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;margin:0;color:#111;background:#fafafa;}
-  .wrap{max-width:1100px;margin:0 auto;padding:24px;}
-  nav{background:#fff;border-bottom:1px solid #ddd;padding:0 24px;display:flex;gap:24px;align-items:center;}
-  nav a{text-decoration:none;color:#444;padding:12px 0;font-size:15px;border-bottom:2px solid transparent;}
-  nav a.active{color:#111;font-weight:600;border-bottom-color:#111;}
-  nav .logo{font-weight:700;color:#111;font-size:16px;margin-right:12px;}
-  .card{border:1px solid #ddd;border-radius:12px;padding:16px;margin-bottom:16px;background:#fff;}
-  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
-  .btn{padding:6px 10px;border:1px solid #ccc;border-radius:10px;background:#fff;cursor:pointer;font-size:13px;}
-  .btn.active{border-color:#111;font-weight:700;}
-  .btn.danger{border-color:#c00;color:#c00;}
-  .btn.primary{border-color:#0066cc;color:#0066cc;}
-  select,input{padding:6px 10px;border-radius:10px;border:1px solid #ccc;}
-  input[type=text],input[type=number]{width:110px;}
-  label{font-size:13px;color:#444;display:flex;flex-direction:column;gap:4px;}
-  .muted{color:#666;font-size:13px;}
-  table{width:100%;border-collapse:collapse;font-size:14px;}
-  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #eee;}
-  .err{color:#c00;font-size:13px;}
-  .ok{color:#080;font-size:13px;}
-  input[type=checkbox]{width:auto;margin:0;}
-  .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:100;justify-content:center;align-items:center;}
-  .modal-bg.open{display:flex;}
-  .modal{background:#fff;border-radius:14px;padding:24px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.15);}
-  .modal h3{margin-top:0;}
-  .modal table{font-size:13px;}
-  .modal .row{margin-top:12px;}
-</style>
+<link rel="stylesheet" href="/style.css" />
 </head>
 <body>
 
 <nav>
-  <span class="logo">MCMon</span>
-  <a href="/">Graphs</a>
+  <span class="logo">⚡ MCMon</span>
+  <a href="/">Dashboard</a>
   <a href="/servers.html" class="active">Servers</a>
+  <span class="spacer"></span>
+  <button class="theme-toggle" id="themeBtn" title="Toggle theme">🌙</button>
 </nav>
 
 <div class="wrap">
 
 <!-- Server list -->
 <div class="card">
-  <div class="row" style="justify-content:space-between;margin-bottom:12px;">
-    <h2 style="margin:0;">Servers</h2>
+  <div class="card-header">
+    <h2>Servers</h2>
     <div class="row">
-      <button class="btn primary" id="btnExport">Export selected</button>
-      <button class="btn primary" id="btnImportOpen">Import from file</button>
+      <button class="btn primary" id="btnExport">↓ Export selected</button>
+      <button class="btn primary" id="btnImportOpen">↑ Import</button>
       <input type="file" id="importFile" accept=".json" style="display:none">
     </div>
   </div>
   <table id="targetsTable">
     <thead><tr>
-      <th><input type="checkbox" id="selectAll"></th>
-      <th>Name</th><th>Host:Port</th><th>Interval</th><th>Burst</th><th>Timeout</th><th></th>
+      <th style="width:32px"><input type="checkbox" id="selectAll"></th>
+      <th>Status</th><th>Name</th><th>Host</th><th>Interval</th><th>Burst</th><th>Timeout</th><th></th>
     </tr></thead>
     <tbody></tbody>
   </table>
-  <div class="muted" style="margin-top:8px;" id="selectInfo">Select servers above to export.</div>
+  <div class="muted" style="margin-top:10px;" id="selectInfo">Select servers to export their configuration.</div>
 </div>
 
 <!-- Add / edit form -->
-<div class="card">
-  <h2 style="margin-top:0;">Add / edit server</h2>
-  <form id="targetForm" class="row">
+<div class="card" id="formCard">
+  <div class="card-header">
+    <h2 id="formTitle">Add server</h2>
+  </div>
+  <form id="targetForm">
     <input type="hidden" id="f_editId">
-    <label>Name<input type="text" id="f_name" required placeholder="My Server"></label>
-    <label>Host<input type="text" id="f_host" required placeholder="mc.example.com"></label>
-    <label>Port<input type="number" id="f_port" required value="25565"></label>
-    <label>Ping period (sec)<input type="number" id="f_interval" required value="60" min="5"></label>
-    <label>Probes per burst<input type="number" id="f_burst" required value="5" min="1" max="20"></label>
-    <label>Timeout (ms)<input type="number" id="f_timeout" required value="1500" min="100"></label>
-    <label>Gap between probes (ms)<input type="number" id="f_gap" required value="1500" min="0"></label>
-    <label>Protocol version<input type="number" id="f_proto" required value="760"></label>
-    <div class="row" style="align-self:flex-end;">
-      <button class="btn" type="submit" id="f_submit">Add server</button>
-      <button class="btn" type="button" id="f_cancel" style="display:none">Cancel edit</button>
+    <div class="row" style="margin-bottom:12px;">
+      <label>Name<input type="text" id="f_name" required placeholder="My Server"></label>
+      <label>Host<input type="text" id="f_host" required placeholder="mc.example.com"></label>
+      <label>Port<input type="number" id="f_port" required value="25565"></label>
+    </div>
+    <div class="row" style="margin-bottom:16px;">
+      <label>Ping period (sec)<input type="number" id="f_interval" required value="60" min="5"></label>
+      <label>Probes / burst<input type="number" id="f_burst" required value="5" min="1" max="20"></label>
+      <label>Timeout (ms)<input type="number" id="f_timeout" required value="1500" min="100"></label>
+      <label>Probe gap (ms)<input type="number" id="f_gap" required value="1500" min="0"></label>
+      <label>Protocol ver.<input type="number" id="f_proto" required value="760"></label>
+    </div>
+    <div class="row">
+      <button class="btn primary" type="submit" id="f_submit">Add server</button>
+      <button class="btn" type="button" id="f_cancel" style="display:none">Cancel</button>
     </div>
   </form>
   <div class="err" id="formErr"></div>
@@ -92,9 +72,9 @@
 <div class="modal-bg" id="importModal">
   <div class="modal">
     <h3>Import servers</h3>
-    <p class="muted">Select which servers to import. Servers with the same ID will be overwritten.</p>
+    <p class="muted" style="margin-bottom:12px;">Select which servers to import. Existing servers with the same ID will be overwritten.</p>
     <table id="importTable">
-      <thead><tr><th><input type="checkbox" id="importSelectAll" checked></th><th>Name</th><th>Host:Port</th><th>Interval</th></tr></thead>
+      <thead><tr><th style="width:32px"><input type="checkbox" id="importSelectAll" checked></th><th>Name</th><th>Host</th><th>Interval</th></tr></thead>
       <tbody></tbody>
     </table>
     <div class="err" id="importErr"></div>
@@ -106,16 +86,27 @@
 </div>
 
 <script>
+// ===== Theme =====
+const themeBtn = document.getElementById('themeBtn');
+function applyTheme(dark) {
+  document.body.classList.toggle('dark', dark);
+  themeBtn.textContent = dark ? '☀️' : '🌙';
+  localStorage.setItem('mcmon-theme', dark ? 'dark' : 'light');
+}
+themeBtn.onclick = () => applyTheme(!document.body.classList.contains('dark'));
+applyTheme(localStorage.getItem('mcmon-theme') === 'dark' || (!localStorage.getItem('mcmon-theme') && matchMedia('(prefers-color-scheme:dark)').matches));
+
+// ===== State =====
 let targetsCache = [];
 let selected = new Set();
 let importData = [];
+let importSelected = new Set();
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-// --- Server list ---
-
+// ===== Server list =====
 async function loadTargets() {
   targetsCache = await fetch('/api/targets').then(r => r.json()) || [];
   if (!Array.isArray(targetsCache)) targetsCache = [];
@@ -130,13 +121,14 @@ function renderTable() {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td><input type="checkbox" class="sel" data-id="${t.id}" ${selected.has(t.id)?'checked':''}></td>
-      <td>${esc(t.name || t.id)}</td>
+      <td><span class="dot online"></span></td>
+      <td><strong>${esc(t.name || t.id)}</strong></td>
       <td>${esc(t.host)}:${t.port}</td>
       <td>${t.interval_sec}s</td>
       <td>${t.probes_per_burst}</td>
       <td>${t.timeout_ms}ms</td>
-      <td>
-        <button class="btn" data-edit="${t.id}">Edit</button>
+      <td class="row">
+        <button class="btn ghost" data-edit="${t.id}">Edit</button>
         <button class="btn danger" data-del="${t.id}">Delete</button>
       </td>`;
     tbody.appendChild(tr);
@@ -153,8 +145,8 @@ function renderTable() {
 
 function updateSelectInfo() {
   document.getElementById('selectInfo').textContent = selected.size
-    ? `${selected.size} server(s) selected.`
-    : 'Select servers above to export.';
+    ? `${selected.size} server(s) selected for export.`
+    : 'Select servers to export their configuration.';
 }
 
 document.getElementById('selectAll').onchange = function() {
@@ -163,8 +155,7 @@ document.getElementById('selectAll').onchange = function() {
   renderTable();
 };
 
-// --- Add / edit form ---
-
+// ===== Add / edit form =====
 function fillForm(id) {
   const t = targetsCache.find(x => x.id === id);
   if (!t) return;
@@ -177,11 +168,12 @@ function fillForm(id) {
   document.getElementById('f_timeout').value = t.timeout_ms;
   document.getElementById('f_gap').value = t.probe_gap_ms;
   document.getElementById('f_proto').value = t.protocol_version;
+  document.getElementById('formTitle').textContent = 'Edit server';
   document.getElementById('f_submit').textContent = 'Save changes';
   document.getElementById('f_cancel').style.display = '';
   document.getElementById('formErr').textContent = '';
   document.getElementById('formOk').textContent = '';
-  window.scrollTo({ top: document.getElementById('targetForm').offsetTop - 80, behavior: 'smooth' });
+  document.getElementById('formCard').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 function resetForm() {
@@ -192,6 +184,7 @@ function resetForm() {
   document.getElementById('f_timeout').value = 1500;
   document.getElementById('f_gap').value = 1500;
   document.getElementById('f_proto').value = 760;
+  document.getElementById('formTitle').textContent = 'Add server';
   document.getElementById('f_submit').textContent = 'Add server';
   document.getElementById('f_cancel').style.display = 'none';
   document.getElementById('formErr').textContent = '';
@@ -229,29 +222,26 @@ document.getElementById('targetForm').addEventListener('submit', async (e) => {
     document.getElementById('formErr').textContent = await res.text();
     return;
   }
-  const saved = await res.json();
-  document.getElementById('formOk').textContent = editId ? 'Server updated.' : `Server "${saved.name || saved.id}" added.`;
+  document.getElementById('formOk').textContent = editId ? 'Server updated.' : 'Server added.';
   resetForm();
-  document.getElementById('formOk').textContent = editId ? 'Server updated.' : `Server added.`;
   await loadTargets();
 });
 
 async function deleteTarget(id) {
   const t = targetsCache.find(x => x.id === id);
   const label = t ? (t.name || t.id) : id;
-  if (!confirm(`Delete server "${label}"? History stays in the database but probing stops.`)) return;
+  if (!confirm(`Delete "${label}"? History stays in the database but probing stops.`)) return;
   const res = await fetch(`/api/targets/${encodeURIComponent(id)}`, { method: 'DELETE' });
   if (!res.ok && res.status !== 204) { alert(await res.text()); return; }
   await loadTargets();
 }
 
-// --- Export ---
-
+// ===== Export =====
 document.getElementById('btnExport').onclick = () => {
   if (selected.size === 0) { alert('Select at least one server to export.'); return; }
   const toExport = targetsCache.filter(t => selected.has(t.id)).map(t => {
     const copy = { ...t };
-    delete copy.id; // IDs are auto-generated; export clean
+    delete copy.id;
     return copy;
   });
   const blob = new Blob([JSON.stringify(toExport, null, 2)], { type: 'application/json' });
@@ -262,11 +252,8 @@ document.getElementById('btnExport').onclick = () => {
   URL.revokeObjectURL(a.href);
 };
 
-// --- Import ---
-
-document.getElementById('btnImportOpen').onclick = () => {
-  document.getElementById('importFile').click();
-};
+// ===== Import =====
+document.getElementById('btnImportOpen').onclick = () => document.getElementById('importFile').click();
 
 document.getElementById('importFile').onchange = (e) => {
   const file = e.target.files[0];
@@ -279,15 +266,11 @@ document.getElementById('importFile').onchange = (e) => {
       importData = parsed;
       renderImportModal();
       document.getElementById('importModal').classList.add('open');
-    } catch (err) {
-      alert('Invalid JSON file: ' + err.message);
-    }
+    } catch (err) { alert('Invalid JSON file: ' + err.message); }
     document.getElementById('importFile').value = '';
   };
   reader.readAsText(file);
 };
-
-let importSelected = new Set();
 
 function renderImportModal() {
   importSelected = new Set(importData.map((_, i) => i));
@@ -297,7 +280,7 @@ function renderImportModal() {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td><input type="checkbox" class="impsel" data-idx="${i}" checked></td>
-      <td>${esc(t.name || t.id || '(unnamed)')}</td>
+      <td><strong>${esc(t.name || t.id || '(unnamed)')}</strong></td>
       <td>${esc(t.host || '?')}:${t.port || 25565}</td>
       <td>${t.interval_sec || 60}s</td>`;
     tbody.appendChild(tr);
@@ -316,41 +299,26 @@ document.getElementById('importSelectAll').onchange = function() {
   document.querySelectorAll('#importTable .impsel').forEach((cb, i) => cb.checked = importSelected.has(i));
 };
 
-document.getElementById('importCancel').onclick = () => {
-  document.getElementById('importModal').classList.remove('open');
-};
+document.getElementById('importCancel').onclick = () => document.getElementById('importModal').classList.remove('open');
 
 document.getElementById('importConfirm').onclick = async () => {
-  if (importSelected.size === 0) {
-    document.getElementById('importErr').textContent = 'Select at least one server.';
-    return;
-  }
+  if (importSelected.size === 0) { document.getElementById('importErr').textContent = 'Select at least one server.'; return; }
   const toImport = importData.filter((_, i) => importSelected.has(i));
   const res = await fetch('/api/targets/import', {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify(toImport),
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(toImport),
   });
-  if (!res.ok) {
-    document.getElementById('importErr').textContent = await res.text();
-    return;
-  }
+  if (!res.ok) { document.getElementById('importErr').textContent = await res.text(); return; }
   document.getElementById('importModal').classList.remove('open');
   await loadTargets();
 };
 
-// close modal on bg click
 document.getElementById('importModal').onclick = (e) => {
-  if (e.target === document.getElementById('importModal')) {
+  if (e.target === document.getElementById('importModal'))
     document.getElementById('importModal').classList.remove('open');
-  }
 };
 
-// --- Init ---
-(async () => {
-  resetForm();
-  await loadTargets();
-})();
+// ===== Init =====
+(async () => { resetForm(); await loadTargets(); })();
 </script>
 
 </body>

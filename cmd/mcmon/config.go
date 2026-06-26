@@ -92,8 +92,16 @@ func openConfigStore(path string) (*ConfigStore, error) {
 	if err != nil {
 		return nil, err
 	}
+	dirty := false
 	for i := range cfg.Targets {
 		cfg.Targets[i] = cfg.Targets[i].normalized()
+		if strings.TrimSpace(cfg.Targets[i].ID) == "" {
+			cfg.Targets[i].ID = generateID()
+			dirty = true
+		}
+	}
+	if dirty {
+		_ = writeConfig(path, cfg)
 	}
 	return &ConfigStore{path: path, cfg: cfg}, nil
 }
