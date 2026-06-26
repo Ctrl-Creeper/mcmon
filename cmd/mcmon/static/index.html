@@ -6,8 +6,30 @@
 <title>MC Latency Monitor</title>
 <link rel="stylesheet" href="/style.css" />
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2"></script>
-<script src="https://cdn.jsdelivr.net/npm/hammerjs@2"></script>
+<style>
+  .server-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); gap: 16px; }
+  .server-card { cursor: pointer; position: relative; }
+  .server-card:hover { box-shadow: var(--shadow-lg); transform: translateY(-2px); }
+  .server-card .header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .server-card .name { font-size: 15px; font-weight: 600; }
+  .server-card .host { font-size: 12px; color: var(--text-faint); }
+  .server-card .mini-stats { display: flex; gap: 16px; margin-bottom: 8px; font-size: 12px; }
+  .server-card .mini-stats .val { font-weight: 600; }
+  .server-card .mini-stats .val.green { color: var(--green); }
+  .server-card .mini-stats .val.red { color: var(--red); }
+  .server-card .chart-container { height: 120px; }
+  .server-card .click-hint {
+    position: absolute; top: 12px; right: 16px;
+    font-size: 11px; color: var(--text-faint);
+    opacity: 0; transition: opacity 0.2s;
+  }
+  .server-card:hover .click-hint { opacity: 1; }
+  .empty-state {
+    text-align: center; padding: 60px 20px; color: var(--text-faint);
+  }
+  .empty-state a { color: var(--accent); }
+  @media (max-width: 560px) { .server-grid { grid-template-columns: 1fr; } }
+</style>
 </head>
 <body>
 
@@ -23,31 +45,16 @@
 
 <!-- Summary stats -->
 <div class="stats-row" id="statsRow">
-  <div class="stat-card"><div class="stat-label">Servers</div><div class="stat-value accent" id="statServers">-</div></div>
+  <div class="stat-card"><div class="stat-label">Servers</div><div class="stat-value accent" id="statTotal">-</div></div>
   <div class="stat-card"><div class="stat-label">Online</div><div class="stat-value green" id="statOnline">-</div></div>
-  <div class="stat-card"><div class="stat-label">Current Median</div><div class="stat-value" id="statMedian">-</div></div>
-  <div class="stat-card"><div class="stat-label">Avg Loss</div><div class="stat-value" id="statLoss">-</div></div>
+  <div class="stat-card"><div class="stat-label">Offline</div><div class="stat-value red" id="statOffline">-</div></div>
+  <div class="stat-card"><div class="stat-label">Avg Median</div><div class="stat-value" id="statAvgMedian">-</div></div>
 </div>
 
-<!-- Controls -->
-<div class="card">
-  <div class="row">
-    <select id="targetSelect"></select>
-    <div class="row" id="rangeButtons"></div>
-    <span class="spacer"></span>
-    <button class="btn ghost" id="resetZoom" title="Reset zoom">↺ Reset zoom</button>
-  </div>
-</div>
-
-<!-- Chart -->
-<div class="card">
-  <div class="chart-wrap">
-    <canvas id="chart" height="100"></canvas>
-  </div>
-  <div class="muted" style="margin-top:12px;">
-    Shaded band: min–max &nbsp;|&nbsp; Green line: median &nbsp;|&nbsp; Red bars: packet loss %.
-    &nbsp; <strong>Scroll</strong> zoom · <strong>Drag</strong> pan · <strong>Shift+drag</strong> box zoom · <strong>Double-click</strong> reset.
-  </div>
+<!-- Server grid -->
+<div class="server-grid" id="grid"></div>
+<div class="empty-state" id="emptyState" style="display:none;">
+  No servers configured yet. <a href="/servers.html">Add one →</a>
 </div>
 
 </div>
@@ -60,141 +67,161 @@ function applyTheme(dark) {
   themeBtn.textContent = dark ? '☀️' : '🌙';
   localStorage.setItem('mcmon-theme', dark ? 'dark' : 'light');
 }
-themeBtn.onclick = () => applyTheme(!document.body.classList.contains('dark'));
+themeBtn.onclick = () => { applyTheme(!document.body.classList.contains('dark')); renderAll(); };
 applyTheme(localStorage.getItem('mcmon-theme') === 'dark' || (!localStorage.getItem('mcmon-theme') && matchMedia('(prefers-color-scheme:dark)').matches));
 
-// ===== State =====
-const ranges = ['1h','6h','12h','1d','7d','30d'];
-let currentRange = '1h';
-let currentTarget = null;
-let chart = null;
-let targetsCache = [];
-
-// ===== Chart colors =====
 function chartColors() {
   const dark = document.body.classList.contains('dark');
   return {
-    band: dark ? 'rgba(140,120,255,0.12)' : 'rgba(100,80,200,0.1)',
+    band: dark ? 'rgba(140,120,255,0.15)' : 'rgba(100,80,200,0.12)',
     bandBorder: dark ? 'rgba(140,120,255,0.3)' : 'rgba(100,80,200,0.25)',
     median: dark ? '#8be98b' : '#00a040',
     loss: dark ? 'rgba(255,80,80,0.5)' : 'rgba(220,40,40,0.4)',
     grid: dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
-    tick: dark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)',
+    tick: dark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)',
   };
 }
 
-// ===== Load targets =====
-async function loadTargets() {
-  targetsCache = await fetch('/api/targets').then(r => r.json()) || [];
-  if (!Array.isArray(targetsCache)) targetsCache = [];
-  const sel = document.getElementById('targetSelect');
-  const prev = currentTarget;
-  sel.innerHTML = '';
-  targetsCache.forEach(t => {
-    const opt = document.createElement('option');
-    opt.value = t.id;
-    opt.textContent = t.name || t.id;
-    sel.appendChild(opt);
-  });
-  if (targetsCache.find(t => t.id === prev)) currentTarget = prev;
-  else currentTarget = targetsCache.length ? targetsCache[0].id : null;
-  sel.value = currentTarget || '';
-  sel.onchange = () => { currentTarget = sel.value; refresh(); };
-  document.getElementById('statServers').textContent = targetsCache.length;
+let targets = [];
+let seriesCache = {};
+let charts = {};
+
+async function loadAll() {
+  targets = await fetch('/api/targets').then(r => r.json()) || [];
+  if (!Array.isArray(targets)) targets = [];
+
+  await Promise.all(targets.map(async t => {
+    const data = await fetch(`/api/series?target=${encodeURIComponent(t.id)}&range=1h`).then(r => r.json());
+    seriesCache[t.id] = data || [];
+  }));
+
+  updateStats();
+  renderAll();
 }
 
-function renderRangeButtons() {
-  const c = document.getElementById('rangeButtons');
-  c.innerHTML = '';
-  ranges.forEach(r => {
-    const b = document.createElement('button');
-    b.className = 'btn' + (r === currentRange ? ' active' : '');
-    b.textContent = r;
-    b.onclick = () => { currentRange = r; renderRangeButtons(); refresh(); };
-    c.appendChild(b);
+function updateStats() {
+  document.getElementById('statTotal').textContent = targets.length;
+  let online = 0, offline = 0, medianSum = 0, medianCount = 0;
+  targets.forEach(t => {
+    const arr = seriesCache[t.id] || [];
+    const last = arr.length ? arr[arr.length - 1] : null;
+    if (last && last.P50 != null && last.LossPct < 1) {
+      online++;
+      medianSum += last.P50;
+      medianCount++;
+    } else {
+      offline++;
+    }
   });
+  document.getElementById('statOnline').textContent = online;
+  document.getElementById('statOffline').textContent = offline;
+  const offEl = document.getElementById('statOffline');
+  offEl.className = 'stat-value ' + (offline > 0 ? 'red' : '');
+  document.getElementById('statAvgMedian').textContent = medianCount ? (medianSum / medianCount).toFixed(1) + ' ms' : '—';
 }
 
-document.getElementById('resetZoom').onclick = () => { if (chart) chart.resetZoom(); };
+function renderAll() {
+  const grid = document.getElementById('grid');
+  const empty = document.getElementById('emptyState');
 
-async function refresh() {
-  if (!currentTarget) {
-    if (chart) { chart.destroy(); chart = null; }
-    document.getElementById('statOnline').textContent = '-';
-    document.getElementById('statMedian').textContent = '-';
-    document.getElementById('statLoss').textContent = '-';
+  if (targets.length === 0) {
+    grid.innerHTML = '';
+    empty.style.display = '';
     return;
   }
-  const data = await fetch(`/api/series?target=${encodeURIComponent(currentTarget)}&range=${currentRange}`).then(r => r.json());
-  const arr = data || [];
-  const labels = arr.map(d => new Date(d.Ts * 1000).toLocaleString());
+  empty.style.display = 'none';
+
+  // Destroy old charts
+  Object.values(charts).forEach(c => c.destroy());
+  charts = {};
+
+  grid.innerHTML = '';
+  targets.forEach(t => {
+    const arr = seriesCache[t.id] || [];
+    const last = arr.length ? arr[arr.length - 1] : null;
+    const isOnline = last && last.P50 != null && last.LossPct < 1;
+    const p50 = last && last.P50 != null ? last.P50.toFixed(1) + ' ms' : '—';
+    const lossAvg = arr.length ? (arr.reduce((s, d) => s + d.LossPct, 0) / arr.length * 100).toFixed(1) + '%' : '—';
+
+    const card = document.createElement('div');
+    card.className = 'card server-card';
+    card.onclick = () => { window.location.href = `/detail.html?id=${encodeURIComponent(t.id)}`; };
+    card.innerHTML = `
+      <span class="click-hint">Click for details →</span>
+      <div class="header">
+        <span class="dot ${isOnline ? 'online' : 'offline'}"></span>
+        <span class="name">${esc(t.name || t.id)}</span>
+        <span class="host">${esc(t.host)}:${t.port}</span>
+      </div>
+      <div class="mini-stats">
+        <span>Median: <span class="val ${isOnline ? 'green' : 'red'}">${p50}</span></span>
+        <span>Loss: <span class="val ${parseFloat(lossAvg) < 1 ? 'green' : 'red'}">${lossAvg}</span></span>
+        <span>Interval: <span class="val">${t.interval_sec}s</span></span>
+      </div>
+      <div class="chart-container"><canvas id="chart-${t.id}"></canvas></div>
+    `;
+    grid.appendChild(card);
+
+    renderMiniChart(t.id, arr);
+  });
+}
+
+function renderMiniChart(id, arr) {
+  const canvas = document.getElementById('chart-' + id);
+  if (!canvas) return;
+  const cc = chartColors();
+
+  const labels = arr.map(d => {
+    const dt = new Date(d.Ts * 1000);
+    return dt.getHours().toString().padStart(2,'0') + ':' + dt.getMinutes().toString().padStart(2,'0');
+  });
   const minD = arr.map(d => d.Min);
   const p50  = arr.map(d => d.P50);
   const maxD = arr.map(d => d.Max);
-  const loss = arr.map(d => d.LossPct * 100);
 
-  // Update stats
-  const lastSample = arr.length ? arr[arr.length - 1] : null;
-  if (lastSample && lastSample.P50 != null) {
-    document.getElementById('statOnline').textContent = lastSample.LossPct < 1 ? 'Yes' : 'No';
-    document.getElementById('statOnline').className = 'stat-value ' + (lastSample.LossPct < 1 ? 'green' : 'red');
-    document.getElementById('statMedian').textContent = lastSample.P50.toFixed(1) + ' ms';
-  } else {
-    document.getElementById('statOnline').textContent = 'No';
-    document.getElementById('statOnline').className = 'stat-value red';
-    document.getElementById('statMedian').textContent = '—';
-  }
-  const avgLoss = arr.length ? arr.reduce((s,d) => s + d.LossPct, 0) / arr.length * 100 : 0;
-  const lossEl = document.getElementById('statLoss');
-  lossEl.textContent = avgLoss.toFixed(1) + '%';
-  lossEl.className = 'stat-value ' + (avgLoss < 1 ? 'green' : avgLoss < 10 ? '' : 'red');
-
-  const cc = chartColors();
-  const ctx = document.getElementById('chart').getContext('2d');
-  if (chart) chart.destroy();
-  chart = new Chart(ctx, {
+  charts[id] = new Chart(canvas, {
     type: 'line',
     data: {
       labels,
       datasets: [
-        { label: 'max', data: maxD, borderColor: cc.bandBorder, backgroundColor: cc.band, fill: '+1', pointRadius: 0, borderWidth: 1, yAxisID: 'y' },
-        { label: 'min', data: minD, borderColor: cc.bandBorder, backgroundColor: cc.band, fill: false, pointRadius: 0, borderWidth: 1, yAxisID: 'y' },
-        { label: 'median', data: p50, borderColor: cc.median, borderWidth: 2, backgroundColor: 'transparent', pointRadius: 0, tension: 0.3, yAxisID: 'y' },
-        { label: 'loss %', data: loss, type: 'bar', backgroundColor: cc.loss, borderRadius: 2, yAxisID: 'y1' },
+        { data: maxD, borderColor: cc.bandBorder, backgroundColor: cc.band, fill: '+1', pointRadius: 0, borderWidth: 0.5 },
+        { data: minD, borderColor: cc.bandBorder, backgroundColor: 'transparent', fill: false, pointRadius: 0, borderWidth: 0.5 },
+        { data: p50, borderColor: cc.median, borderWidth: 1.5, backgroundColor: 'transparent', pointRadius: 0, tension: 0.3 },
       ]
     },
     options: {
       animation: false,
       responsive: true,
+      maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       scales: {
-        x: { ticks: { color: cc.tick, maxTicksLimit: 12, font: { size: 11 } }, grid: { color: cc.grid } },
-        y: { title: { display: true, text: 'ms', color: cc.tick, font: { size: 12 } }, min: 0, ticks: { color: cc.tick, font: { size: 11 } }, grid: { color: cc.grid } },
-        y1: { position: 'right', min: 0, max: 100, title: { display: true, text: 'loss %', color: cc.tick, font: { size: 12 } }, ticks: { color: cc.tick, font: { size: 11 } }, grid: { drawOnChartArea: false } },
+        x: { display: false },
+        y: { display: false, min: 0 },
       },
       plugins: {
-        legend: { labels: { color: cc.tick, font: { size: 12 }, usePointStyle: true, pointStyle: 'circle' } },
-        tooltip: { backgroundColor: 'rgba(0,0,0,0.8)', titleFont: { size: 12 }, bodyFont: { size: 12 }, cornerRadius: 8, padding: 10 },
-        zoom: {
-          pan: { enabled: true, mode: 'x' },
-          zoom: {
-            wheel: { enabled: true, speed: 0.05 },
-            pinch: { enabled: true },
-            drag: { enabled: true, backgroundColor: 'rgba(100,80,200,0.08)', borderColor: 'rgba(100,80,200,0.3)', borderWidth: 1, modifierKey: 'shift' },
-            mode: 'x',
-          },
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(0,0,0,0.8)', titleFont: { size: 11 }, bodyFont: { size: 11 },
+          cornerRadius: 6, padding: 8,
+          callbacks: {
+            label: ctx => {
+              const names = ['max', 'min', 'median'];
+              return names[ctx.datasetIndex] + ': ' + (ctx.raw != null ? ctx.raw.toFixed(1) + ' ms' : '—');
+            }
+          }
         },
       },
     },
   });
 }
 
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
 (async () => {
-  await loadTargets();
-  renderRangeButtons();
-  await refresh();
-  setInterval(refresh, 30000);
-  setInterval(loadTargets, 60000);
+  await loadAll();
+  setInterval(loadAll, 30000);
 })();
 </script>
 

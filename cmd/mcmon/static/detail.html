@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Server Detail - MC Latency Monitor</title>
+<link rel="stylesheet" href="/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2"></script>
+<style>
+  .back-link { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); text-decoration: none; font-size: 13px; margin-bottom: 16px; transition: color 0.2s; }
+  .back-link:hover { color: var(--accent); }
+  .detail-header { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+  .detail-header .name { font-size: 22px; font-weight: 700; }
+  .detail-header .host { font-size: 14px; color: var(--text-faint); }
+  .detail-sub { font-size: 12px; color: var(--text-faint); margin-bottom: 16px; }
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="logo">⚡ MCMon</span>
+  <a href="/">Dashboard</a>
+  <a href="/servers.html">Servers</a>
+  <span class="spacer"></span>
+  <button class="theme-toggle" id="themeBtn" title="Toggle theme">🌙</button>
+</nav>
+
+<div class="wrap">
+
+<a href="/" class="back-link">← Back to Dashboard</a>
+
+<!-- Server info -->
+<div class="card" id="infoCard">
+  <div class="detail-header">
+    <span class="dot" id="statusDot"></span>
+    <span class="name" id="serverName">—</span>
+    <span class="host" id="serverHost">—</span>
+  </div>
+  <div class="detail-sub" id="serverConfig"></div>
+</div>
+
+<!-- Stats -->
+<div class="stats-row" id="statsRow">
+  <div class="stat-card"><div class="stat-label">Status</div><div class="stat-value" id="statStatus">—</div></div>
+  <div class="stat-card"><div class="stat-label">Current Median</div><div class="stat-value" id="statMedian">—</div></div>
+  <div class="stat-card"><div class="stat-label">Current Min</div><div class="stat-value" id="statMin">—</div></div>
+  <div class="stat-card"><div class="stat-label">Current Max</div><div class="stat-value" id="statMax">—</div></div>
+  <div class="stat-card"><div class="stat-label">Avg Loss</div><div class="stat-value" id="statLoss">—</div></div>
+  <div class="stat-card"><div class="stat-label">Samples</div><div class="stat-value" id="statSamples">—</div></div>
+</div>
+
+<!-- Controls -->
+<div class="card">
+  <div class="row">
+    <div class="row" id="rangeButtons"></div>
+    <span class="spacer"></span>
+    <button class="btn ghost" id="resetZoom">↺ Reset zoom</button>
+  </div>
+</div>
+
+<!-- Chart -->
+<div class="card">
+  <div style="position:relative;">
+    <canvas id="chart" height="110"></canvas>
+  </div>
+  <div class="muted" style="margin-top:12px;">
+    Shaded band: min–max &nbsp;|&nbsp; Green line: median &nbsp;|&nbsp; Red bars: packet loss %.
+    &nbsp; <strong>Scroll</strong> zoom · <strong>Drag</strong> pan · <strong>Shift+drag</strong> box zoom · <strong>Double-click</strong> reset.
+  </div>
+</div>
+
+</div>
+
+<script>
+// ===== Theme =====
+const themeBtn = document.getElementById('themeBtn');
+function applyTheme(dark) {
+  document.body.classList.toggle('dark', dark);
+  themeBtn.textContent = dark ? '☀️' : '🌙';
+  localStorage.setItem('mcmon-theme', dark ? 'dark' : 'light');
+}
+themeBtn.onclick = () => { applyTheme(!document.body.classList.contains('dark')); refresh(); };
+applyTheme(localStorage.getItem('mcmon-theme') === 'dark' || (!localStorage.getItem('mcmon-theme') && matchMedia('(prefers-color-scheme:dark)').matches));
+
+function chartColors() {
+  const dark = document.body.classList.contains('dark');
+  return {
+    band: dark ? 'rgba(140,120,255,0.15)' : 'rgba(100,80,200,0.12)',
+    bandBorder: dark ? 'rgba(140,120,255,0.3)' : 'rgba(100,80,200,0.25)',
+    median: dark ? '#8be98b' : '#00a040',
+    loss: dark ? 'rgba(255,80,80,0.5)' : 'rgba(220,40,40,0.4)',
+    grid: dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
+    tick: dark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)',
+  };
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ===== State =====
+const params = new URLSearchParams(location.search);
+const targetId = params.get('id');
+if (!targetId) { location.href = '/'; }
+
+const ranges = ['1h','6h','12h','1d','7d','30d'];
+let currentRange = '1h';
+let chart = null;
+let targetInfo = null;
+
+// ===== Load server info =====
+async function loadTarget() {
+  const targets = await fetch('/api/targets').then(r => r.json()) || [];
+  targetInfo = (targets || []).find(t => t.id === targetId);
+  if (!targetInfo) {
+    document.getElementById('serverName').textContent = 'Server not found';
+    return;
+  }
+  document.title = (targetInfo.name || targetInfo.id) + ' - MC Latency Monitor';
+  document.getElementById('serverName').textContent = targetInfo.name || targetInfo.id;
+  document.getElementById('serverHost').textContent = targetInfo.host + ':' + targetInfo.port;
+  document.getElementById('serverConfig').textContent =
+    `Interval: ${targetInfo.interval_sec}s · Burst: ${targetInfo.probes_per_burst} probes · Timeout: ${targetInfo.timeout_ms}ms · Gap: ${targetInfo.probe_gap_ms}ms`;
+}
+
+function renderRangeButtons() {
+  const c = document.getElementById('rangeButtons');
+  c.innerHTML = '';
+  ranges.forEach(r => {
+    const b = document.createElement('button');
+    b.className = 'btn' + (r === currentRange ? ' active' : '');
+    b.textContent = r;
+    b.onclick = () => { currentRange = r; renderRangeButtons(); refresh(); };
+    c.appendChild(b);
+  });
+}
+
+document.getElementById('resetZoom').onclick = () => { if (chart) chart.resetZoom(); };
+
+async function refresh() {
+  if (!targetId) return;
+  const data = await fetch(`/api/series?target=${encodeURIComponent(targetId)}&range=${currentRange}`).then(r => r.json());
+  const arr = data || [];
+
+  // Update stats
+  const last = arr.length ? arr[arr.length - 1] : null;
+  const isOnline = last && last.P50 != null && last.LossPct < 1;
+
+  const dot = document.getElementById('statusDot');
+  dot.className = 'dot ' + (isOnline ? 'online' : 'offline');
+
+  const statusEl = document.getElementById('statStatus');
+  statusEl.textContent = isOnline ? 'Online' : 'Offline';
+  statusEl.className = 'stat-value ' + (isOnline ? 'green' : 'red');
+
+  document.getElementById('statMedian').textContent = last && last.P50 != null ? last.P50.toFixed(1) + ' ms' : '—';
+  document.getElementById('statMin').textContent = last && last.Min != null ? last.Min.toFixed(1) + ' ms' : '—';
+  document.getElementById('statMax').textContent = last && last.Max != null ? last.Max.toFixed(1) + ' ms' : '—';
+
+  const avgLoss = arr.length ? arr.reduce((s, d) => s + d.LossPct, 0) / arr.length * 100 : 0;
+  const lossEl = document.getElementById('statLoss');
+  lossEl.textContent = avgLoss.toFixed(1) + '%';
+  lossEl.className = 'stat-value ' + (avgLoss < 1 ? 'green' : avgLoss < 10 ? '' : 'red');
+
+  document.getElementById('statSamples').textContent = arr.length;
+
+  // Chart
+  const labels = arr.map(d => new Date(d.Ts * 1000).toLocaleString());
+  const minD = arr.map(d => d.Min);
+  const p50  = arr.map(d => d.P50);
+  const maxD = arr.map(d => d.Max);
+  const loss = arr.map(d => d.LossPct * 100);
+
+  const cc = chartColors();
+  const ctx = document.getElementById('chart').getContext('2d');
+  if (chart) chart.destroy();
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'max', data: maxD, borderColor: cc.bandBorder, backgroundColor: cc.band, fill: '+1', pointRadius: 0, borderWidth: 1, yAxisID: 'y' },
+        { label: 'min', data: minD, borderColor: cc.bandBorder, backgroundColor: cc.band, fill: false, pointRadius: 0, borderWidth: 1, yAxisID: 'y' },
+        { label: 'median', data: p50, borderColor: cc.median, borderWidth: 2, backgroundColor: 'transparent', pointRadius: 0, tension: 0.3, yAxisID: 'y' },
+        { label: 'loss %', data: loss, type: 'bar', backgroundColor: cc.loss, borderRadius: 2, yAxisID: 'y1' },
+      ]
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { ticks: { color: cc.tick, maxTicksLimit: 14, font: { size: 11 } }, grid: { color: cc.grid } },
+        y: { title: { display: true, text: 'ms', color: cc.tick, font: { size: 12 } }, min: 0, ticks: { color: cc.tick, font: { size: 11 } }, grid: { color: cc.grid } },
+        y1: { position: 'right', min: 0, max: 100, title: { display: true, text: 'loss %', color: cc.tick, font: { size: 12 } }, ticks: { color: cc.tick, font: { size: 11 } }, grid: { drawOnChartArea: false } },
+      },
+      plugins: {
+        legend: { labels: { color: cc.tick, font: { size: 12 }, usePointStyle: true, pointStyle: 'circle' } },
+        tooltip: { backgroundColor: 'rgba(0,0,0,0.8)', titleFont: { size: 12 }, bodyFont: { size: 12 }, cornerRadius: 8, padding: 10 },
+        zoom: {
+          pan: { enabled: true, mode: 'x' },
+          zoom: {
+            wheel: { enabled: true, speed: 0.05 },
+            pinch: { enabled: true },
+            drag: { enabled: true, backgroundColor: 'rgba(100,80,200,0.08)', borderColor: 'rgba(100,80,200,0.3)', borderWidth: 1, modifierKey: 'shift' },
+            mode: 'x',
+          },
+        },
+      },
+    },
+  });
+}
+
+(async () => {
+  await loadTarget();
+  renderRangeButtons();
+  await refresh();
+  setInterval(refresh, 30000);
+})();
+</script>
+
+</body>
+</html>
