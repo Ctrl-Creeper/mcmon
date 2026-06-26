@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>MC Latency Monitor</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2"></script>
 <style>
   body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;margin:24px;color:#111;background:#fafafa;}
   .card{border:1px solid #ddd;border-radius:12px;padding:16px;margin-bottom:16px;background:#fff;}
@@ -35,9 +37,8 @@
 
   <h3>Add / edit server</h3>
   <form id="targetForm" class="row">
-    <input type="hidden" id="f_origId">
-    <label>ID<input type="text" id="f_id" required placeholder="unique-id"></label>
-    <label>Name<input type="text" id="f_name" placeholder="Display name"></label>
+    <input type="hidden" id="f_editId">
+    <label>Name<input type="text" id="f_name" required placeholder="My Server"></label>
     <label>Host<input type="text" id="f_host" required placeholder="mc.example.com"></label>
     <label>Port<input type="number" id="f_port" required value="25565"></label>
     <label>Ping period (sec)<input type="number" id="f_interval" required value="60" min="5"></label>
@@ -58,13 +59,15 @@
     <div>Viewing:</div>
     <select id="targetSelect"></select>
     <div class="row" id="rangeButtons"></div>
+    <button class="btn" id="resetZoom">Reset zoom</button>
   </div>
 </div>
 
-<div class="card">
+<div class="card" style="position:relative;">
   <canvas id="chart" height="100"></canvas>
   <div class="muted" style="margin-top:10px;">
-    Shaded band: min~max latency over the probe burst; line: median; red bars (right axis): packet loss %.
+    Shaded band: min~max; green line: median; red bars: loss %.
+    <strong>Scroll</strong> to zoom, <strong>drag</strong> to pan. Double-click to reset zoom.
   </div>
 </div>
 
@@ -85,16 +88,16 @@ function renderTargetSelect() {
   const sel = document.getElementById('targetSelect');
   const prev = currentTarget;
   sel.innerHTML = '';
-  targetsCache.forEach(t => {
+  (targetsCache || []).forEach(t => {
     const opt = document.createElement('option');
     opt.value = t.id;
     opt.textContent = t.name || t.id;
     sel.appendChild(opt);
   });
-  if (targetsCache.find(t => t.id === prev)) {
+  if ((targetsCache || []).find(t => t.id === prev)) {
     currentTarget = prev;
   } else {
-    currentTarget = targetsCache.length ? targetsCache[0].id : null;
+    currentTarget = targetsCache && targetsCache.length ? targetsCache[0].id : null;
   }
   sel.value = currentTarget || '';
   sel.onchange = () => { currentTarget = sel.value; refresh(); };
@@ -103,11 +106,11 @@ function renderTargetSelect() {
 function renderTargetsTable() {
   const tbody = document.querySelector('#targetsTable tbody');
   tbody.innerHTML = '';
-  targetsCache.forEach(t => {
+  (targetsCache || []).forEach(t => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${escapeHtml(t.name || t.id)}</td>
-      <td>${escapeHtml(t.host)}:${t.port}</td>
+      <td>${esc(t.name || t.id)}</td>
+      <td>${esc(t.host)}:${t.port}</td>
       <td>${t.interval_sec}s</td>
       <td>${t.probes_per_burst}</td>
       <td>${t.timeout_ms}ms</td>
@@ -119,15 +122,14 @@ function renderTargetsTable() {
   tbody.querySelectorAll('[data-del]').forEach(b => b.onclick = () => deleteTarget(b.dataset.del));
 }
 
-function escapeHtml(s) {
+function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
 function fillForm(id) {
-  const t = targetsCache.find(x => x.id === id);
+  const t = (targetsCache || []).find(x => x.id === id);
   if (!t) return;
-  document.getElementById('f_origId').value = t.id;
-  document.getElementById('f_id').value = t.id;
+  document.getElementById('f_editId').value = t.id;
   document.getElementById('f_name').value = t.name || '';
   document.getElementById('f_host').value = t.host;
   document.getElementById('f_port').value = t.port;
@@ -142,7 +144,7 @@ function fillForm(id) {
 
 function resetForm() {
   document.getElementById('targetForm').reset();
-  document.getElementById('f_origId').value = '';
+  document.getElementById('f_editId').value = '';
   document.getElementById('f_interval').value = 60;
   document.getElementById('f_burst').value = 5;
   document.getElementById('f_timeout').value = 1500;
@@ -157,10 +159,8 @@ document.getElementById('f_cancel').onclick = resetForm;
 
 document.getElementById('targetForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const origId = document.getElementById('f_origId').value;
-  const id = document.getElementById('f_id').value.trim();
+  const editId = document.getElementById('f_editId').value;
   const payload = {
-    id,
     name: document.getElementById('f_name').value.trim(),
     host: document.getElementById('f_host').value.trim(),
     port: parseInt(document.getElementById('f_port').value, 10),
@@ -171,21 +171,32 @@ document.getElementById('targetForm').addEventListener('submit', async (e) => {
     protocol_version: parseInt(document.getElementById('f_proto').value, 10),
   };
 
-  const url = origId ? `/api/targets/${encodeURIComponent(origId)}` : '/api/targets';
-  const method = origId ? 'PUT' : 'POST';
+  let url, method;
+  if (editId) {
+    payload.id = editId;
+    url = `/api/targets/${encodeURIComponent(editId)}`;
+    method = 'PUT';
+  } else {
+    url = '/api/targets';
+    method = 'POST';
+  }
+
   const res = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
   if (!res.ok) {
     document.getElementById('formErr').textContent = await res.text();
     return;
   }
+  const saved = await res.json();
   resetForm();
-  currentTarget = id;
+  currentTarget = saved.id;
   await loadTargets();
   await refresh();
 });
 
 async function deleteTarget(id) {
-  if (!confirm(`Delete server "${id}"? Its stored history stays in the database but the probe stops.`)) return;
+  const t = (targetsCache || []).find(x => x.id === id);
+  const label = t ? (t.name || t.id) : id;
+  if (!confirm(`Delete server "${label}"? History stays in the database but probing stops.`)) return;
   const res = await fetch(`/api/targets/${encodeURIComponent(id)}`, { method: 'DELETE' });
   if (!res.ok && res.status !== 204) {
     alert(await res.text());
@@ -207,6 +218,8 @@ function renderRangeButtons() {
   });
 }
 
+document.getElementById('resetZoom').onclick = () => { if (chart) chart.resetZoom(); };
+
 async function refresh() {
   if (!currentTarget) {
     if (chart) { chart.destroy(); chart = null; }
@@ -214,9 +227,9 @@ async function refresh() {
   }
   const data = await fetch(`/api/series?target=${encodeURIComponent(currentTarget)}&range=${currentRange}`).then(r => r.json());
   const labels = (data || []).map(d => new Date(d.Ts * 1000).toLocaleString());
-  const min = (data || []).map(d => d.Min);
-  const p50 = (data || []).map(d => d.P50);
-  const max = (data || []).map(d => d.Max);
+  const minD = (data || []).map(d => d.Min);
+  const p50  = (data || []).map(d => d.P50);
+  const maxD = (data || []).map(d => d.Max);
   const loss = (data || []).map(d => d.LossPct * 100);
 
   const ctx = document.getElementById('chart').getContext('2d');
@@ -226,9 +239,9 @@ async function refresh() {
     data: {
       labels,
       datasets: [
-        { label: 'max', data: max, borderColor: 'rgba(150,150,150,0.4)', backgroundColor: 'rgba(200,200,200,0.25)', fill: '+1', pointRadius: 0, yAxisID: 'y' },
-        { label: 'min', data: min, borderColor: 'rgba(150,150,150,0.4)', backgroundColor: 'rgba(200,200,200,0.25)', fill: false, pointRadius: 0, yAxisID: 'y' },
-        { label: 'median', data: p50, borderColor: '#00a000', backgroundColor: 'transparent', pointRadius: 0, yAxisID: 'y' },
+        { label: 'max', data: maxD, borderColor: 'rgba(150,150,150,0.4)', backgroundColor: 'rgba(200,200,200,0.25)', fill: '+1', pointRadius: 0, yAxisID: 'y' },
+        { label: 'min', data: minD, borderColor: 'rgba(150,150,150,0.4)', backgroundColor: 'rgba(200,200,200,0.25)', fill: false, pointRadius: 0, yAxisID: 'y' },
+        { label: 'median', data: p50, borderColor: '#00a000', borderWidth: 2, backgroundColor: 'transparent', pointRadius: 0, yAxisID: 'y' },
         { label: 'loss %', data: loss, type: 'bar', backgroundColor: 'rgba(255,0,0,0.4)', yAxisID: 'y1' },
       ]
     },
@@ -236,10 +249,30 @@ async function refresh() {
       animation: false,
       interaction: { mode: 'index', intersect: false },
       scales: {
-        y: { title: { display: true, text: 'ms' }, min: 0 },
+        y:  { title: { display: true, text: 'ms' }, min: 0 },
         y1: { position: 'right', min: 0, max: 100, title: { display: true, text: 'loss %' }, grid: { drawOnChartArea: false } },
-      }
-    }
+      },
+      plugins: {
+        zoom: {
+          pan: {
+            enabled: true,
+            mode: 'x',
+          },
+          zoom: {
+            wheel: { enabled: true, speed: 0.05 },
+            pinch: { enabled: true },
+            drag: {
+              enabled: true,
+              backgroundColor: 'rgba(0,128,0,0.1)',
+              borderColor: '#00a000',
+              borderWidth: 1,
+              modifierKey: 'shift',
+            },
+            mode: 'x',
+          },
+        },
+      },
+    },
   });
 }
 

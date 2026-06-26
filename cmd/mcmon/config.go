@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -39,10 +41,13 @@ func (t Target) normalized() Target {
 	return t
 }
 
+func generateID() string {
+	b := make([]byte, 4)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
 func (t Target) validate() error {
-	if strings.TrimSpace(t.ID) == "" {
-		return fmt.Errorf("id is required")
-	}
 	if strings.TrimSpace(t.Host) == "" {
 		return fmt.Errorf("host is required")
 	}
@@ -123,6 +128,9 @@ func (c *ConfigStore) Upsert(t Target) (Target, error) {
 		return Target{}, err
 	}
 	t = t.normalized()
+	if strings.TrimSpace(t.ID) == "" {
+		t.ID = generateID()
+	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
