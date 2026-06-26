@@ -51,6 +51,31 @@ func newMux(st *store.Store, cs *ConfigStore, mgr *Manager) *http.ServeMux {
 
 	mux.HandleFunc("/api/targets/", func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(r.URL.Path, "/api/targets/")
+
+		// Bulk import sub-route
+		if id == "import" {
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			var targets []Target
+			if !decodeJSON(w, r, &targets) {
+				return
+			}
+			var saved []Target
+			for _, t := range targets {
+				s, err := cs.Upsert(t)
+				if err != nil {
+					http.Error(w, "target "+t.Name+": "+err.Error(), http.StatusBadRequest)
+					return
+				}
+				mgr.Start(s)
+				saved = append(saved, s)
+			}
+			writeJSON(w, saved)
+			return
+		}
+
 		if id == "" {
 			http.Error(w, "missing target id", http.StatusBadRequest)
 			return
@@ -67,7 +92,7 @@ func newMux(st *store.Store, cs *ConfigStore, mgr *Manager) *http.ServeMux {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			mgr.Start(saved) // restarts loop with new settings
+			mgr.Start(saved)
 			writeJSON(w, saved)
 		case http.MethodDelete:
 			mgr.Stop(id)

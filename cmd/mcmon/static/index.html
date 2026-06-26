@@ -8,67 +8,48 @@
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/hammerjs@2"></script>
 <style>
-  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;margin:24px;color:#111;background:#fafafa;}
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;margin:0;color:#111;background:#fafafa;}
+  .wrap{max-width:1100px;margin:0 auto;padding:24px;}
+  nav{background:#fff;border-bottom:1px solid #ddd;padding:0 24px;display:flex;gap:24px;align-items:center;}
+  nav a{text-decoration:none;color:#444;padding:12px 0;font-size:15px;border-bottom:2px solid transparent;}
+  nav a.active{color:#111;font-weight:600;border-bottom-color:#111;}
+  nav .logo{font-weight:700;color:#111;font-size:16px;margin-right:12px;}
   .card{border:1px solid #ddd;border-radius:12px;padding:16px;margin-bottom:16px;background:#fff;}
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
-  .btn{padding:6px 10px;border:1px solid #ccc;border-radius:10px;background:#fff;cursor:pointer;}
+  .btn{padding:6px 10px;border:1px solid #ccc;border-radius:10px;background:#fff;cursor:pointer;font-size:13px;}
   .btn.active{border-color:#111;font-weight:700;}
-  .btn.danger{border-color:#c00;color:#c00;}
-  select,input{padding:6px 10px;border-radius:10px;border:1px solid #ccc;}
-  input[type=text],input[type=number]{width:110px;}
-  label{font-size:13px;color:#444;display:flex;flex-direction:column;gap:4px;}
+  select{padding:6px 10px;border-radius:10px;border:1px solid #ccc;}
   .muted{color:#666;font-size:13px;}
   canvas{max-width:100%;}
-  table{width:100%;border-collapse:collapse;font-size:14px;}
-  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #eee;}
-  .err{color:#c00;font-size:13px;}
 </style>
 </head>
 <body>
 
-<h1>Minecraft Server Latency Monitor</h1>
+<nav>
+  <span class="logo">MCMon</span>
+  <a href="/" class="active">Graphs</a>
+  <a href="/servers.html">Servers</a>
+</nav>
 
-<div class="card">
-  <h2 style="margin-top:0">Servers</h2>
-  <table id="targetsTable">
-    <thead><tr><th>Name</th><th>Host:Port</th><th>Interval</th><th>Burst</th><th>Timeout</th><th></th></tr></thead>
-    <tbody></tbody>
-  </table>
-
-  <h3>Add / edit server</h3>
-  <form id="targetForm" class="row">
-    <input type="hidden" id="f_editId">
-    <label>Name<input type="text" id="f_name" required placeholder="My Server"></label>
-    <label>Host<input type="text" id="f_host" required placeholder="mc.example.com"></label>
-    <label>Port<input type="number" id="f_port" required value="25565"></label>
-    <label>Ping period (sec)<input type="number" id="f_interval" required value="60" min="5"></label>
-    <label>Probes per burst<input type="number" id="f_burst" required value="5" min="1" max="20"></label>
-    <label>Timeout (ms)<input type="number" id="f_timeout" required value="1500" min="100"></label>
-    <label>Gap between probes (ms)<input type="number" id="f_gap" required value="1500" min="0"></label>
-    <label>Protocol version<input type="number" id="f_proto" required value="760"></label>
-    <div class="row" style="align-self:flex-end;">
-      <button class="btn" type="submit" id="f_submit">Add server</button>
-      <button class="btn" type="button" id="f_cancel" style="display:none">Cancel edit</button>
-    </div>
-  </form>
-  <div class="err" id="formErr"></div>
-</div>
+<div class="wrap">
 
 <div class="card">
   <div class="row">
-    <div>Viewing:</div>
+    <div>Target:</div>
     <select id="targetSelect"></select>
     <div class="row" id="rangeButtons"></div>
     <button class="btn" id="resetZoom">Reset zoom</button>
   </div>
 </div>
 
-<div class="card" style="position:relative;">
+<div class="card">
   <canvas id="chart" height="100"></canvas>
   <div class="muted" style="margin-top:10px;">
     Shaded band: min~max; green line: median; red bars: loss %.
-    <strong>Scroll</strong> to zoom, <strong>drag</strong> to pan. Double-click to reset zoom.
+    <strong>Scroll</strong> to zoom, <strong>drag</strong> to pan, <strong>Shift+drag</strong> to box-zoom. Double-click or button to reset.
   </div>
+</div>
+
 </div>
 
 <script>
@@ -76,134 +57,22 @@ const ranges = ['1h','6h','12h','1d','7d','30d'];
 let currentRange = '1h';
 let currentTarget = null;
 let chart = null;
-let targetsCache = [];
 
 async function loadTargets() {
-  targetsCache = await fetch('/api/targets').then(r => r.json()) || [];
-  renderTargetsTable();
-  renderTargetSelect();
-}
-
-function renderTargetSelect() {
+  const targets = await fetch('/api/targets').then(r => r.json()) || [];
   const sel = document.getElementById('targetSelect');
   const prev = currentTarget;
   sel.innerHTML = '';
-  (targetsCache || []).forEach(t => {
+  targets.forEach(t => {
     const opt = document.createElement('option');
     opt.value = t.id;
     opt.textContent = t.name || t.id;
     sel.appendChild(opt);
   });
-  if ((targetsCache || []).find(t => t.id === prev)) {
-    currentTarget = prev;
-  } else {
-    currentTarget = targetsCache && targetsCache.length ? targetsCache[0].id : null;
-  }
+  if (targets.find(t => t.id === prev)) currentTarget = prev;
+  else currentTarget = targets.length ? targets[0].id : null;
   sel.value = currentTarget || '';
   sel.onchange = () => { currentTarget = sel.value; refresh(); };
-}
-
-function renderTargetsTable() {
-  const tbody = document.querySelector('#targetsTable tbody');
-  tbody.innerHTML = '';
-  (targetsCache || []).forEach(t => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${esc(t.name || t.id)}</td>
-      <td>${esc(t.host)}:${t.port}</td>
-      <td>${t.interval_sec}s</td>
-      <td>${t.probes_per_burst}</td>
-      <td>${t.timeout_ms}ms</td>
-      <td><button class="btn" data-edit="${t.id}">Edit</button>
-          <button class="btn danger" data-del="${t.id}">Delete</button></td>`;
-    tbody.appendChild(tr);
-  });
-  tbody.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => fillForm(b.dataset.edit));
-  tbody.querySelectorAll('[data-del]').forEach(b => b.onclick = () => deleteTarget(b.dataset.del));
-}
-
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-function fillForm(id) {
-  const t = (targetsCache || []).find(x => x.id === id);
-  if (!t) return;
-  document.getElementById('f_editId').value = t.id;
-  document.getElementById('f_name').value = t.name || '';
-  document.getElementById('f_host').value = t.host;
-  document.getElementById('f_port').value = t.port;
-  document.getElementById('f_interval').value = t.interval_sec;
-  document.getElementById('f_burst').value = t.probes_per_burst;
-  document.getElementById('f_timeout').value = t.timeout_ms;
-  document.getElementById('f_gap').value = t.probe_gap_ms;
-  document.getElementById('f_proto').value = t.protocol_version;
-  document.getElementById('f_submit').textContent = 'Save changes';
-  document.getElementById('f_cancel').style.display = '';
-}
-
-function resetForm() {
-  document.getElementById('targetForm').reset();
-  document.getElementById('f_editId').value = '';
-  document.getElementById('f_interval').value = 60;
-  document.getElementById('f_burst').value = 5;
-  document.getElementById('f_timeout').value = 1500;
-  document.getElementById('f_gap').value = 1500;
-  document.getElementById('f_proto').value = 760;
-  document.getElementById('f_submit').textContent = 'Add server';
-  document.getElementById('f_cancel').style.display = 'none';
-  document.getElementById('formErr').textContent = '';
-}
-
-document.getElementById('f_cancel').onclick = resetForm;
-
-document.getElementById('targetForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const editId = document.getElementById('f_editId').value;
-  const payload = {
-    name: document.getElementById('f_name').value.trim(),
-    host: document.getElementById('f_host').value.trim(),
-    port: parseInt(document.getElementById('f_port').value, 10),
-    interval_sec: parseInt(document.getElementById('f_interval').value, 10),
-    probes_per_burst: parseInt(document.getElementById('f_burst').value, 10),
-    timeout_ms: parseInt(document.getElementById('f_timeout').value, 10),
-    probe_gap_ms: parseInt(document.getElementById('f_gap').value, 10),
-    protocol_version: parseInt(document.getElementById('f_proto').value, 10),
-  };
-
-  let url, method;
-  if (editId) {
-    payload.id = editId;
-    url = `/api/targets/${encodeURIComponent(editId)}`;
-    method = 'PUT';
-  } else {
-    url = '/api/targets';
-    method = 'POST';
-  }
-
-  const res = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
-  if (!res.ok) {
-    document.getElementById('formErr').textContent = await res.text();
-    return;
-  }
-  const saved = await res.json();
-  resetForm();
-  currentTarget = saved.id;
-  await loadTargets();
-  await refresh();
-});
-
-async function deleteTarget(id) {
-  const t = (targetsCache || []).find(x => x.id === id);
-  const label = t ? (t.name || t.id) : id;
-  if (!confirm(`Delete server "${label}"? History stays in the database but probing stops.`)) return;
-  const res = await fetch(`/api/targets/${encodeURIComponent(id)}`, { method: 'DELETE' });
-  if (!res.ok && res.status !== 204) {
-    alert(await res.text());
-    return;
-  }
-  await loadTargets();
-  await refresh();
 }
 
 function renderRangeButtons() {
@@ -221,10 +90,7 @@ function renderRangeButtons() {
 document.getElementById('resetZoom').onclick = () => { if (chart) chart.resetZoom(); };
 
 async function refresh() {
-  if (!currentTarget) {
-    if (chart) { chart.destroy(); chart = null; }
-    return;
-  }
+  if (!currentTarget) { if (chart) { chart.destroy(); chart = null; } return; }
   const data = await fetch(`/api/series?target=${encodeURIComponent(currentTarget)}&range=${currentRange}`).then(r => r.json());
   const labels = (data || []).map(d => new Date(d.Ts * 1000).toLocaleString());
   const minD = (data || []).map(d => d.Min);
@@ -254,20 +120,11 @@ async function refresh() {
       },
       plugins: {
         zoom: {
-          pan: {
-            enabled: true,
-            mode: 'x',
-          },
+          pan: { enabled: true, mode: 'x' },
           zoom: {
             wheel: { enabled: true, speed: 0.05 },
             pinch: { enabled: true },
-            drag: {
-              enabled: true,
-              backgroundColor: 'rgba(0,128,0,0.1)',
-              borderColor: '#00a000',
-              borderWidth: 1,
-              modifierKey: 'shift',
-            },
+            drag: { enabled: true, backgroundColor: 'rgba(0,128,0,0.1)', borderColor: '#00a000', borderWidth: 1, modifierKey: 'shift' },
             mode: 'x',
           },
         },
@@ -277,7 +134,6 @@ async function refresh() {
 }
 
 (async () => {
-  resetForm();
   await loadTargets();
   renderRangeButtons();
   await refresh();
