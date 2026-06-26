@@ -1,0 +1,4 @@
+/mcmon.db
+/config.json
+*.exe
+/dist/

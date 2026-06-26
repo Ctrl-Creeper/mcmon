@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>MC Latency Monitor</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;margin:24px;color:#111;background:#fafafa;}
+  .card{border:1px solid #ddd;border-radius:12px;padding:16px;margin-bottom:16px;background:#fff;}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+  .btn{padding:6px 10px;border:1px solid #ccc;border-radius:10px;background:#fff;cursor:pointer;}
+  .btn.active{border-color:#111;font-weight:700;}
+  select{padding:6px 10px;border-radius:10px;border:1px solid #ccc;}
+  .muted{color:#666;font-size:13px;}
+  canvas{max-width:100%;}
+</style>
+</head>
+<body>
+
+<h1>Minecraft Server Latency Monitor</h1>
+
+<div class="card">
+  <div class="row">
+    <div>Target:</div>
+    <select id="targetSelect"></select>
+    <div class="row" id="rangeButtons"></div>
+  </div>
+</div>
+
+<div class="card">
+  <canvas id="chart" height="100"></canvas>
+  <div class="muted" style="margin-top:10px;">
+    Shaded band: min~max latency over 5 probes/minute; line: median; red bars (right axis): packet loss %.
+  </div>
+</div>
+
+<script>
+const ranges = ['1h','6h','12h','1d','7d','30d'];
+let currentRange = '1h';
+let currentTarget = null;
+let chart = null;
+
+async function loadTargets() {
+  const targets = await fetch('/api/targets').then(r => r.json());
+  const sel = document.getElementById('targetSelect');
+  sel.innerHTML = '';
+  targets.forEach(t => {
+    const opt = document.createElement('option');
+    opt.value = t.id;
+    opt.textContent = t.name || t.id;
+    sel.appendChild(opt);
+  });
+  if (targets.length) currentTarget = targets[0].id;
+  sel.addEventListener('change', () => { currentTarget = sel.value; refresh(); });
+}
+
+function renderRangeButtons() {
+  const c = document.getElementById('rangeButtons');
+  c.innerHTML = '';
+  ranges.forEach(r => {
+    const b = document.createElement('button');
+    b.className = 'btn' + (r === currentRange ? ' active' : '');
+    b.textContent = r;
+    b.onclick = () => { currentRange = r; renderRangeButtons(); refresh(); };
+    c.appendChild(b);
+  });
+}
+
+async function refresh() {
+  if (!currentTarget) return;
+  const data = await fetch(`/api/series?target=${encodeURIComponent(currentTarget)}&range=${currentRange}`).then(r => r.json());
+  const labels = (data || []).map(d => new Date(d.Ts * 1000).toLocaleString());
+  const min = (data || []).map(d => d.Min);
+  const p50 = (data || []).map(d => d.P50);
+  const max = (data || []).map(d => d.Max);
+  const loss = (data || []).map(d => d.LossPct * 100);
+
+  const ctx = document.getElementById('chart').getContext('2d');
+  if (chart) chart.destroy();
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'max', data: max, borderColor: 'rgba(150,150,150,0.4)', backgroundColor: 'rgba(200,200,200,0.25)', fill: '+1', pointRadius: 0, yAxisID: 'y' },
+        { label: 'min', data: min, borderColor: 'rgba(150,150,150,0.4)', backgroundColor: 'rgba(200,200,200,0.25)', fill: false, pointRadius: 0, yAxisID: 'y' },
+        { label: 'median', data: p50, borderColor: '#00a000', backgroundColor: 'transparent', pointRadius: 0, yAxisID: 'y' },
+        { label: 'loss %', data: loss, type: 'bar', backgroundColor: 'rgba(255,0,0,0.4)', yAxisID: 'y1' },
+      ]
+    },
+    options: {
+      animation: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        y: { title: { display: true, text: 'ms' }, min: 0 },
+        y1: { position: 'right', min: 0, max: 100, title: { display: true, text: 'loss %' }, grid: { drawOnChartArea: false } },
+      }
+    }
+  });
+}
+
+(async () => {
+  await loadTargets();
+  renderRangeButtons();
+  await refresh();
+  setInterval(refresh, 30000);
+})();
+</script>
+
+</body>
+</html>
