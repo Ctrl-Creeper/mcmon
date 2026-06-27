@@ -5,11 +5,11 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Remote Host - MC Latency Monitor</title>
 <link rel="stylesheet" href="/style.css" />
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="/vendor/chart.umd.js"></script>
 <style>
   .server-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; margin-top: 16px; }
   .server-card { cursor: pointer; }
-  .server-card:hover { box-shadow: var(--shadow-lg); transform: translateY(-2px); }
+  .server-card:hover { box-shadow: var(--shadow-lg); }
   .server-card .header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
   .server-card .name { font-weight: 600; font-size: 14px; }
   .server-card .host { font-size: 12px; color: var(--text-faint); margin-bottom: 6px; }
@@ -17,7 +17,8 @@
   .server-card canvas { max-height: 80px; }
   .config-form { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
   .config-form label { flex: 1; min-width: 200px; }
-  .config-form input[type=text] { width: 100%; }
+  .config-form input[type=text],
+  .config-form input[type=password] { width: 100%; }
 </style>
 </head>
 <body>
@@ -39,6 +40,9 @@
   <div class="config-form">
     <label>Host URL
       <input type="text" id="hostUrl" placeholder="http://your-host:9090" />
+    </label>
+    <label>Admin token
+      <input type="password" id="adminToken" placeholder="Optional for protected hosts" />
     </label>
     <button class="btn primary" id="btnConnect">Connect</button>
     <button class="btn danger" id="btnDisconnect" style="display:none">Disconnect</button>
@@ -90,6 +94,7 @@ let refreshTimer = null;
 const miniCharts = {};
 
 const hostUrlInput = document.getElementById('hostUrl');
+const adminTokenInput = document.getElementById('adminToken');
 const btnConnect = document.getElementById('btnConnect');
 const btnDisconnect = document.getElementById('btnDisconnect');
 const connStatus = document.getElementById('connStatus');
@@ -99,26 +104,36 @@ async function init() {
   const resp = await fetch('/api/remote/config').then(r => r.json());
   if (resp.host_url) {
     hostUrlInput.value = resp.host_url;
+    adminTokenInput.value = resp.admin_token || '';
     doConnect(resp.host_url);
   }
 }
 
 btnConnect.onclick = async () => {
   const url = hostUrlInput.value.trim();
-  if (!url) return;
-  await fetch('/api/remote/config', {
+  const adminToken = adminTokenInput.value.trim();
+  if (!url) {
+    connStatus.innerHTML = '<span class="err">Enter a host URL first.</span>';
+    return;
+  }
+  const saved = await fetch('/api/remote/config', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ host_url: url }),
+    body: JSON.stringify({ host_url: url, admin_token: adminToken }),
   });
-  doConnect(url);
+  if (!saved.ok) {
+    connStatus.innerHTML = '<span class="err">' + esc(await saved.text()) + '</span>';
+    return;
+  }
+  const cfg = await saved.json();
+  doConnect(cfg.host_url);
 };
 
 btnDisconnect.onclick = async () => {
   await fetch('/api/remote/config', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ host_url: '' }),
+    body: JSON.stringify({ host_url: '', admin_token: '' }),
   });
   connected = false;
   if (refreshTimer) clearInterval(refreshTimer);
@@ -126,6 +141,8 @@ btnDisconnect.onclick = async () => {
   btnDisconnect.style.display = 'none';
   btnConnect.style.display = '';
   hostUrlInput.disabled = false;
+  adminTokenInput.disabled = false;
+  adminTokenInput.value = '';
   connStatus.textContent = 'Disconnected.';
   connStatus.className = 'muted';
 };
@@ -140,13 +157,14 @@ async function doConnect(url) {
     connected = true;
     connStatus.innerHTML = '<span class="ok">Connected to ' + esc(url) + '</span>';
     hostUrlInput.disabled = true;
+    adminTokenInput.disabled = true;
     btnConnect.style.display = 'none';
     btnDisconnect.style.display = '';
     remoteContent.style.display = '';
     loadRemote();
     refreshTimer = setInterval(loadRemote, 30000);
   } catch (e) {
-    connStatus.innerHTML = '<span class="err">Failed: ' + esc(e.message) + '</span>';
+    connStatus.innerHTML = '<span class="err">Failed: ' + esc(e.message) + '. Check the host URL and admin token.</span>';
   }
 }
 
@@ -197,11 +215,15 @@ async function loadRemote() {
     }
   } catch (e) {
     console.error('loadRemote:', e);
+    connStatus.innerHTML = '<span class="err">Remote refresh failed: ' + esc(e.message) + '</span>';
   }
 }
 
 async function loadMiniChart(agentId, targetId) {
-  const data = await fetch(`/api/remote/series?agent=${encodeURIComponent(agentId)}&target=${encodeURIComponent(targetId)}&range=1h`).then(r => r.json());
+  const data = await fetch(`/api/remote/series?agent=${encodeURIComponent(agentId)}&target=${encodeURIComponent(targetId)}&range=1h`).then(async r => {
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  });
   const arr = data || [];
 
   const last = arr.length ? arr[arr.length - 1] : null;

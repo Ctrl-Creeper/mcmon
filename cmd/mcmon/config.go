@@ -15,10 +15,10 @@ type Target struct {
 	Name            string `json:"name"`
 	Host            string `json:"host"`
 	Port            int    `json:"port"`
-	IntervalSec     int    `json:"interval_sec"`      // how often to run a probe burst
-	TimeoutMs       int    `json:"timeout_ms"`        // per-probe connect/read timeout
-	ProbesPerBurst  int    `json:"probes_per_burst"`  // samples taken per burst
-	ProbeGapMs      int    `json:"probe_gap_ms"`      // delay between samples within a burst
+	IntervalSec     int    `json:"interval_sec"`     // how often to run a probe burst
+	TimeoutMs       int    `json:"timeout_ms"`       // per-probe connect/read timeout
+	ProbesPerBurst  int    `json:"probes_per_burst"` // samples taken per burst
+	ProbeGapMs      int    `json:"probe_gap_ms"`     // delay between samples within a burst
 	ProtocolVersion int    `json:"protocol_version"`
 }
 
@@ -58,15 +58,16 @@ func (t Target) validate() error {
 }
 
 type Config struct {
-	ListenAddr string   `json:"listen_addr"`
-	DBPath     string   `json:"db_path"`
-	RemoteHost string   `json:"remote_host,omitempty"`
-	Targets    []Target `json:"targets"`
+	ListenAddr       string   `json:"listen_addr"`
+	DBPath           string   `json:"db_path"`
+	RemoteHost       string   `json:"remote_host,omitempty"`
+	RemoteAdminToken string   `json:"remote_admin_token,omitempty"`
+	Targets          []Target `json:"targets"`
 }
 
 func defaultConfig() Config {
 	return Config{
-		ListenAddr: ":8090",
+		ListenAddr: "127.0.0.1:8090",
 		DBPath:     "mcmon.db",
 		Targets: []Target{
 			{
@@ -181,11 +182,18 @@ func (c *ConfigStore) RemoteHost() string {
 	return c.cfg.RemoteHost
 }
 
-func (c *ConfigStore) SetRemoteHost(url string) {
+func (c *ConfigStore) RemoteConfig() (hostURL, adminToken string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.cfg.RemoteHost = url
-	writeConfig(c.path, c.cfg)
+	return c.cfg.RemoteHost, c.cfg.RemoteAdminToken
+}
+
+func (c *ConfigStore) SetRemoteConfig(hostURL, adminToken string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cfg.RemoteHost = hostURL
+	c.cfg.RemoteAdminToken = adminToken
+	return writeConfig(c.path, c.cfg)
 }
 
 func loadConfig(path string) (Config, error) {

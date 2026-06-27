@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Remote Server Detail - MC Latency Monitor</title>
 <link rel="stylesheet" href="/style.css" />
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2"></script>
-<script src="https://cdn.jsdelivr.net/npm/hammerjs@2"></script>
+<script src="/vendor/chart.umd.js"></script>
+<script src="/vendor/chartjs-plugin-zoom.min.js"></script>
+<script src="/vendor/hammer.min.js"></script>
 <style>
   .back-link { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); text-decoration: none; font-size: 13px; margin-bottom: 16px; transition: color 0.2s; }
   .back-link:hover { color: var(--accent); }
@@ -103,8 +103,8 @@ let chart = null;
 
 async function loadTarget() {
   const [agents, targets] = await Promise.all([
-    fetch('/api/remote/agents').then(r => r.json()),
-    fetch(`/api/remote/agents/${encodeURIComponent(agentId)}/targets`).then(r => r.json()),
+    remoteJSON('/api/remote/agents'),
+    remoteJSON(`/api/remote/agents/${encodeURIComponent(agentId)}/targets`),
   ]);
   const agentList = agents || [];
   const targetList = targets || [];
@@ -138,7 +138,14 @@ function renderRangeButtons() {
 document.getElementById('resetZoom').onclick = () => { if (chart) chart.resetZoom(); };
 
 async function refresh() {
-  const data = await fetch(`/api/remote/series?agent=${encodeURIComponent(agentId)}&target=${encodeURIComponent(targetId)}&range=${currentRange}`).then(r => r.json());
+  let data;
+  try {
+    data = await remoteJSON(`/api/remote/series?agent=${encodeURIComponent(agentId)}&target=${encodeURIComponent(targetId)}&range=${currentRange}`);
+  } catch (e) {
+    document.getElementById('statStatus').textContent = 'Remote error';
+    document.getElementById('statStatus').className = 'stat-value red';
+    return;
+  }
   const arr = data || [];
 
   const last = arr.length ? arr[arr.length - 1] : null;
@@ -203,6 +210,12 @@ async function refresh() {
       },
     },
   });
+}
+
+async function remoteJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
 }
 
 (async () => {

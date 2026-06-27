@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -136,25 +138,44 @@ func newMux(st *store.Store, cs *ConfigStore, mgr *Manager) *http.ServeMux {
 	mux.HandleFunc("/api/remote/config", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			writeJSON(w, map[string]string{"host_url": cs.RemoteHost()})
+			hostURL, adminToken := cs.RemoteConfig()
+			writeJSON(w, map[string]string{"host_url": hostURL, "admin_token": adminToken})
 		case http.MethodPost:
 			var body struct {
-				HostURL string `json:"host_url"`
+				HostURL    string `json:"host_url"`
+				AdminToken string `json:"admin_token"`
 			}
 			if !decodeJSON(w, r, &body) {
 				return
 			}
-			cs.SetRemoteHost(body.HostURL)
-			writeJSON(w, map[string]string{"host_url": body.HostURL})
+			hostURL := strings.TrimSpace(body.HostURL)
+			adminToken := strings.TrimSpace(body.AdminToken)
+			if hostURL != "" {
+				normalized, err := normalizeRemoteHost(hostURL)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				hostURL = normalized
+			}
+			if err := cs.SetRemoteConfig(hostURL, adminToken); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, map[string]string{"host_url": hostURL, "admin_token": adminToken})
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
 
 	mux.HandleFunc("/api/remote/", func(w http.ResponseWriter, r *http.Request) {
-		hostURL := cs.RemoteHost()
+		hostURL, adminToken := cs.RemoteConfig()
 		if hostURL == "" {
 			http.Error(w, "no remote host configured", http.StatusBadRequest)
+			return
+		}
+		if _, err := normalizeRemoteHost(hostURL); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		path := strings.TrimPrefix(r.URL.Path, "/api/remote")
@@ -163,7 +184,16 @@ func newMux(st *store.Store, cs *ConfigStore, mgr *Manager) *http.ServeMux {
 			target += "?" + r.URL.RawQuery
 		}
 
-		resp, err := http.Get(target)
+		req, err := http.NewRequest(http.MethodGet, target, nil)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("proxy error: %v", err), http.StatusBadGateway)
+			return
+		}
+		if adminToken != "" {
+			req.Header.Set("Authorization", "Bearer "+adminToken)
+		}
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("proxy error: %v", err), http.StatusBadGateway)
 			return
@@ -175,6 +205,35 @@ func newMux(st *store.Store, cs *ConfigStore, mgr *Manager) *http.ServeMux {
 	})
 
 	return mux
+}
+
+func normalizeRemoteHost(raw string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("remote host must be an absolute http(s) URL")
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("remote host must use http or https")
+	}
+	if u.User != nil {
+		return "", fmt.Errorf("remote host must not include user info")
+	}
+	if strings.TrimSpace(u.RawQuery) != "" || strings.TrimSpace(u.Fragment) != "" {
+		return "", fmt.Errorf("remote host must not include query or fragment")
+	}
+	host := u.Hostname()
+	if host == "" {
+		return "", fmt.Errorf("remote host is missing host")
+	}
+	if ip := net.ParseIP(host); ip != nil && isBlockedRemoteIP(ip) {
+		return "", fmt.Errorf("remote host IP is not allowed")
+	}
+	u.Path = strings.TrimRight(u.EscapedPath(), "/")
+	return strings.TrimRight(u.String(), "/"), nil
+}
+
+func isBlockedRemoteIP(ip net.IP) bool {
+	return ip.IsUnspecified() || ip.IsMulticast()
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
