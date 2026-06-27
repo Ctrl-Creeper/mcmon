@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Server Detail - MC Latency Monitor</title>
+<title>Remote Server Detail - MC Latency Monitor</title>
 <link rel="stylesheet" href="/style.css" />
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2"></script>
@@ -11,10 +11,6 @@
 <style>
   .back-link { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); text-decoration: none; font-size: 13px; margin-bottom: 16px; transition: color 0.2s; }
   .back-link:hover { color: var(--accent); }
-  .detail-header { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
-  .detail-header .name { font-size: 22px; font-weight: 700; }
-  .detail-header .host { font-size: 14px; color: var(--text-faint); }
-  .detail-sub { font-size: 12px; color: var(--text-faint); margin-bottom: 16px; }
 </style>
 </head>
 <body>
@@ -23,27 +19,25 @@
   <span class="logo">⚡ MCMon</span>
   <a href="/">Dashboard</a>
   <a href="/servers.html">Servers</a>
-  <a href="/remote.html">Remote</a>
+  <a href="/remote.html" class="active">Remote</a>
   <span class="spacer"></span>
   <button class="theme-toggle" id="themeBtn" title="Toggle theme">🌙</button>
 </nav>
 
 <div class="wrap">
 
-<a href="/" class="back-link">← Back to Dashboard</a>
+<a href="/remote.html" class="back-link">← Back to Remote</a>
 
-<!-- Server info -->
-<div class="card" id="infoCard">
-  <div class="detail-header">
+<div class="card">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">
     <span class="dot" id="statusDot"></span>
-    <span class="name" id="serverName">—</span>
-    <span class="host" id="serverHost">—</span>
+    <span style="font-size:22px;font-weight:700;" id="serverName">—</span>
+    <span style="font-size:14px;color:var(--text-faint);" id="serverHost">—</span>
   </div>
-  <div class="detail-sub" id="serverConfig"></div>
+  <div class="muted" id="agentInfo"></div>
 </div>
 
-<!-- Stats -->
-<div class="stats-row" id="statsRow">
+<div class="stats-row">
   <div class="stat-card"><div class="stat-label">Status</div><div class="stat-value" id="statStatus">—</div></div>
   <div class="stat-card"><div class="stat-label">Current Median</div><div class="stat-value" id="statMedian">—</div></div>
   <div class="stat-card"><div class="stat-label">Current Min</div><div class="stat-value" id="statMin">—</div></div>
@@ -52,16 +46,14 @@
   <div class="stat-card"><div class="stat-label">Samples</div><div class="stat-value" id="statSamples">—</div></div>
 </div>
 
-<!-- Controls -->
 <div class="card">
   <div class="row">
     <div class="row" id="rangeButtons"></div>
-    <span class="spacer"></span>
+    <span style="flex:1"></span>
     <button class="btn ghost" id="resetZoom">↺ Reset zoom</button>
   </div>
 </div>
 
-<!-- Chart -->
 <div class="card">
   <div style="position:relative;">
     <canvas id="chart" height="110"></canvas>
@@ -75,7 +67,6 @@
 </div>
 
 <script>
-// ===== Theme =====
 const themeBtn = document.getElementById('themeBtn');
 function applyTheme(dark) {
   document.body.classList.toggle('dark', dark);
@@ -101,29 +92,35 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-// ===== State =====
 const params = new URLSearchParams(location.search);
-const targetId = params.get('id');
-if (!targetId) { location.href = '/'; }
+const agentId = params.get('agent');
+const targetId = params.get('target');
+if (!agentId || !targetId) { location.href = '/remote.html'; }
 
 const ranges = ['1h','6h','12h','1d','7d','30d'];
 let currentRange = '1h';
 let chart = null;
-let targetInfo = null;
 
-// ===== Load server info =====
 async function loadTarget() {
-  const targets = await fetch('/api/targets').then(r => r.json()) || [];
-  targetInfo = (targets || []).find(t => t.id === targetId);
-  if (!targetInfo) {
+  const [agents, targets] = await Promise.all([
+    fetch('/api/remote/agents').then(r => r.json()),
+    fetch(`/api/remote/agents/${encodeURIComponent(agentId)}/targets`).then(r => r.json()),
+  ]);
+  const agentList = agents || [];
+  const targetList = targets || [];
+  const agent = agentList.find(a => a.id === agentId);
+  const target = targetList.find(t => t.target_id === targetId);
+
+  if (!target) {
     document.getElementById('serverName').textContent = 'Server not found';
     return;
   }
-  document.title = (targetInfo.name || targetInfo.id) + ' - MC Latency Monitor';
-  document.getElementById('serverName').textContent = targetInfo.name || targetInfo.id;
-  document.getElementById('serverHost').textContent = targetInfo.host + ':' + targetInfo.port;
-  document.getElementById('serverConfig').textContent =
-    `Interval: ${targetInfo.interval_sec}s · Burst: ${targetInfo.probes_per_burst} probes · Timeout: ${targetInfo.timeout_ms}ms · Gap: ${targetInfo.probe_gap_ms}ms`;
+
+  document.title = (target.name || targetId) + ' - Remote - MC Latency Monitor';
+  document.getElementById('serverName').textContent = target.name || targetId;
+  document.getElementById('serverHost').textContent = target.host + ':' + target.port;
+  document.getElementById('agentInfo').textContent = 'Agent: ' + (agent ? agent.name : agentId) + (agent && agent.online ? ' (online)' : ' (offline)');
+  document.getElementById('statusDot').className = 'dot ' + (agent && agent.online ? 'online' : 'offline');
 }
 
 function renderRangeButtons() {
@@ -141,38 +138,32 @@ function renderRangeButtons() {
 document.getElementById('resetZoom').onclick = () => { if (chart) chart.resetZoom(); };
 
 async function refresh() {
-  if (!targetId) return;
-  const data = await fetch(`/api/series?target=${encodeURIComponent(targetId)}&range=${currentRange}`).then(r => r.json());
+  const data = await fetch(`/api/remote/series?agent=${encodeURIComponent(agentId)}&target=${encodeURIComponent(targetId)}&range=${currentRange}`).then(r => r.json());
   const arr = data || [];
 
-  // Update stats
   const last = arr.length ? arr[arr.length - 1] : null;
-  const isOnline = last && last.P50 != null && last.LossPct < 1;
-
-  const dot = document.getElementById('statusDot');
-  dot.className = 'dot ' + (isOnline ? 'online' : 'offline');
+  const isOnline = last && last.p50_ms != null && last.loss_pct < 1;
 
   const statusEl = document.getElementById('statStatus');
   statusEl.textContent = isOnline ? 'Online' : 'Offline';
   statusEl.className = 'stat-value ' + (isOnline ? 'green' : 'red');
 
-  document.getElementById('statMedian').textContent = last && last.P50 != null ? last.P50.toFixed(1) + ' ms' : '—';
-  document.getElementById('statMin').textContent = last && last.Min != null ? last.Min.toFixed(1) + ' ms' : '—';
-  document.getElementById('statMax').textContent = last && last.Max != null ? last.Max.toFixed(1) + ' ms' : '—';
+  document.getElementById('statMedian').textContent = last && last.p50_ms != null ? last.p50_ms.toFixed(1) + ' ms' : '—';
+  document.getElementById('statMin').textContent = last && last.min_ms != null ? last.min_ms.toFixed(1) + ' ms' : '—';
+  document.getElementById('statMax').textContent = last && last.max_ms != null ? last.max_ms.toFixed(1) + ' ms' : '—';
 
-  const avgLoss = arr.length ? arr.reduce((s, d) => s + d.LossPct, 0) / arr.length * 100 : 0;
+  const avgLoss = arr.length ? arr.reduce((s, d) => s + d.loss_pct, 0) / arr.length * 100 : 0;
   const lossEl = document.getElementById('statLoss');
   lossEl.textContent = avgLoss.toFixed(1) + '%';
   lossEl.className = 'stat-value ' + (avgLoss < 1 ? 'green' : avgLoss < 10 ? '' : 'red');
 
   document.getElementById('statSamples').textContent = arr.length;
 
-  // Chart
-  const labels = arr.map(d => new Date(d.Ts * 1000).toLocaleString());
-  const minD = arr.map(d => d.Min);
-  const p50  = arr.map(d => d.P50);
-  const maxD = arr.map(d => d.Max);
-  const loss = arr.map(d => d.LossPct * 100);
+  const labels = arr.map(d => new Date(d.ts * 1000).toLocaleString());
+  const minD = arr.map(d => d.min_ms);
+  const p50 = arr.map(d => d.p50_ms);
+  const maxD = arr.map(d => d.max_ms);
+  const loss = arr.map(d => d.loss_pct * 100);
 
   const cc = chartColors();
   const ctx = document.getElementById('chart').getContext('2d');

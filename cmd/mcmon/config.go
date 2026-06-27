@@ -60,6 +60,7 @@ func (t Target) validate() error {
 type Config struct {
 	ListenAddr string   `json:"listen_addr"`
 	DBPath     string   `json:"db_path"`
+	RemoteHost string   `json:"remote_host,omitempty"`
 	Targets    []Target `json:"targets"`
 }
 
@@ -172,6 +173,19 @@ func (c *ConfigStore) Delete(id string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func (c *ConfigStore) RemoteHost() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cfg.RemoteHost
+}
+
+func (c *ConfigStore) SetRemoteHost(url string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cfg.RemoteHost = url
+	writeConfig(c.path, c.cfg)
 }
 
 func loadConfig(path string) (Config, error) {

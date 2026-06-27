@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Remote Host - MC Latency Monitor</title>
+<link rel="stylesheet" href="/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+  .server-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; margin-top: 16px; }
+  .server-card { cursor: pointer; }
+  .server-card:hover { box-shadow: var(--shadow-lg); transform: translateY(-2px); }
+  .server-card .header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .server-card .name { font-weight: 600; font-size: 14px; }
+  .server-card .host { font-size: 12px; color: var(--text-faint); margin-bottom: 6px; }
+  .server-card .mini-stats { display: flex; gap: 12px; font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+  .server-card canvas { max-height: 80px; }
+  .config-form { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+  .config-form label { flex: 1; min-width: 200px; }
+  .config-form input[type=text] { width: 100%; }
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="logo">⚡ MCMon</span>
+  <a href="/">Dashboard</a>
+  <a href="/servers.html">Servers</a>
+  <a href="/remote.html" class="active">Remote</a>
+  <span class="spacer"></span>
+  <button class="theme-toggle" id="themeBtn" title="Toggle theme">🌙</button>
+</nav>
+
+<div class="wrap">
+
+<div class="card">
+  <div class="card-header"><h2>Remote Host Connection</h2></div>
+  <p class="muted" style="margin-bottom:12px;">Connect to a MCMon Host to view latency data collected by remote agents.</p>
+  <div class="config-form">
+    <label>Host URL
+      <input type="text" id="hostUrl" placeholder="http://your-host:9090" />
+    </label>
+    <button class="btn primary" id="btnConnect">Connect</button>
+    <button class="btn danger" id="btnDisconnect" style="display:none">Disconnect</button>
+  </div>
+  <div id="connStatus" class="muted" style="margin-top:8px;"></div>
+</div>
+
+<div id="remoteContent" style="display:none;">
+
+<div class="stats-row">
+  <div class="stat-card"><div class="stat-label">Agents</div><div class="stat-value" id="statAgents">—</div></div>
+  <div class="stat-card"><div class="stat-label">Online</div><div class="stat-value green" id="statOnline">—</div></div>
+  <div class="stat-card"><div class="stat-label">Servers</div><div class="stat-value accent" id="statServers">—</div></div>
+</div>
+
+<div class="card">
+  <div class="card-header"><h2>Remote Servers</h2></div>
+  <div class="server-grid" id="serverGrid"></div>
+</div>
+
+</div>
+
+</div>
+
+<script>
+const themeBtn = document.getElementById('themeBtn');
+function applyTheme(dark) {
+  document.body.classList.toggle('dark', dark);
+  themeBtn.textContent = dark ? '☀️' : '🌙';
+  localStorage.setItem('mcmon-theme', dark ? 'dark' : 'light');
+}
+themeBtn.onclick = () => { applyTheme(!document.body.classList.contains('dark')); if (connected) loadRemote(); };
+applyTheme(localStorage.getItem('mcmon-theme') === 'dark' || (!localStorage.getItem('mcmon-theme') && matchMedia('(prefers-color-scheme:dark)').matches));
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function chartColors() {
+  const dark = document.body.classList.contains('dark');
+  return {
+    band: dark ? 'rgba(140,120,255,0.15)' : 'rgba(100,80,200,0.12)',
+    median: dark ? '#8be98b' : '#00a040',
+  };
+}
+
+let connected = false;
+let refreshTimer = null;
+const miniCharts = {};
+
+const hostUrlInput = document.getElementById('hostUrl');
+const btnConnect = document.getElementById('btnConnect');
+const btnDisconnect = document.getElementById('btnDisconnect');
+const connStatus = document.getElementById('connStatus');
+const remoteContent = document.getElementById('remoteContent');
+
+async function init() {
+  const resp = await fetch('/api/remote/config').then(r => r.json());
+  if (resp.host_url) {
+    hostUrlInput.value = resp.host_url;
+    doConnect(resp.host_url);
+  }
+}
+
+btnConnect.onclick = async () => {
+  const url = hostUrlInput.value.trim();
+  if (!url) return;
+  await fetch('/api/remote/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ host_url: url }),
+  });
+  doConnect(url);
+};
+
+btnDisconnect.onclick = async () => {
+  await fetch('/api/remote/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ host_url: '' }),
+  });
+  connected = false;
+  if (refreshTimer) clearInterval(refreshTimer);
+  remoteContent.style.display = 'none';
+  btnDisconnect.style.display = 'none';
+  btnConnect.style.display = '';
+  hostUrlInput.disabled = false;
+  connStatus.textContent = 'Disconnected.';
+  connStatus.className = 'muted';
+};
+
+async function doConnect(url) {
+  connStatus.textContent = 'Connecting...';
+  try {
+    const agents = await fetch('/api/remote/agents').then(r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    });
+    connected = true;
+    connStatus.innerHTML = '<span class="ok">Connected to ' + esc(url) + '</span>';
+    hostUrlInput.disabled = true;
+    btnConnect.style.display = 'none';
+    btnDisconnect.style.display = '';
+    remoteContent.style.display = '';
+    loadRemote();
+    refreshTimer = setInterval(loadRemote, 30000);
+  } catch (e) {
+    connStatus.innerHTML = '<span class="err">Failed: ' + esc(e.message) + '</span>';
+  }
+}
+
+async function loadRemote() {
+  try {
+    const [agents, targets] = await Promise.all([
+      fetch('/api/remote/agents').then(r => r.json()),
+      fetch('/api/remote/targets').then(r => r.json()),
+    ]);
+    const agentList = agents || [];
+    const targetList = targets || [];
+    const online = agentList.filter(a => a.online).length;
+
+    document.getElementById('statAgents').textContent = agentList.length;
+    document.getElementById('statOnline').textContent = online;
+    document.getElementById('statServers').textContent = targetList.length;
+
+    const agentMap = {};
+    agentList.forEach(a => { agentMap[a.id] = a; });
+
+    const grid = document.getElementById('serverGrid');
+    grid.innerHTML = '';
+
+    for (const t of targetList) {
+      const agent = agentMap[t.agent_id] || {};
+      const isOnline = agent.online || false;
+      const card = document.createElement('div');
+      card.className = 'card server-card';
+      card.onclick = () => { location.href = `/remote-detail.html?agent=${encodeURIComponent(t.agent_id)}&target=${encodeURIComponent(t.target_id)}`; };
+      card.innerHTML = `
+        <div class="header">
+          <span class="dot ${isOnline ? 'online' : 'offline'}"></span>
+          <span class="name">${esc(t.name)}</span>
+        </div>
+        <div class="host">${esc(t.host)}:${t.port} · Agent: ${esc(agent.name || t.agent_id)}</div>
+        <div class="mini-stats">
+          <span id="rstat-med-${t.agent_id}-${t.target_id}">Median: —</span>
+          <span id="rstat-loss-${t.agent_id}-${t.target_id}">Loss: —</span>
+        </div>
+        <canvas id="rchart-${t.agent_id}-${t.target_id}" height="80"></canvas>
+      `;
+      grid.appendChild(card);
+      loadMiniChart(t.agent_id, t.target_id);
+    }
+
+    if (targetList.length === 0) {
+      grid.innerHTML = '<div class="muted" style="padding:24px;text-align:center;">No servers being monitored on the remote host.</div>';
+    }
+  } catch (e) {
+    console.error('loadRemote:', e);
+  }
+}
+
+async function loadMiniChart(agentId, targetId) {
+  const data = await fetch(`/api/remote/series?agent=${encodeURIComponent(agentId)}&target=${encodeURIComponent(targetId)}&range=1h`).then(r => r.json());
+  const arr = data || [];
+
+  const last = arr.length ? arr[arr.length - 1] : null;
+  const medEl = document.getElementById(`rstat-med-${agentId}-${targetId}`);
+  const lossEl = document.getElementById(`rstat-loss-${agentId}-${targetId}`);
+  if (medEl && last) {
+    medEl.textContent = 'Median: ' + (last.p50_ms != null ? last.p50_ms.toFixed(1) + ' ms' : '—');
+  }
+  if (lossEl && arr.length) {
+    const avgLoss = arr.reduce((s, d) => s + d.loss_pct, 0) / arr.length * 100;
+    lossEl.textContent = 'Loss: ' + avgLoss.toFixed(1) + '%';
+  }
+
+  const key = `${agentId}-${targetId}`;
+  if (miniCharts[key]) miniCharts[key].destroy();
+
+  const canvas = document.getElementById(`rchart-${agentId}-${targetId}`);
+  if (!canvas) return;
+  const cc = chartColors();
+
+  miniCharts[key] = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: arr.map(() => ''),
+      datasets: [{
+        data: arr.map(d => d.p50_ms),
+        borderColor: cc.median,
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0.3,
+        fill: { target: 'origin', above: cc.band },
+      }]
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      scales: { x: { display: false }, y: { display: false, min: 0 } },
+    },
+  });
+}
+
+init();
+</script>
+
+</body>
+</html>

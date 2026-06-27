@@ -3,6 +3,8 @@ package main
 import (
 	"embed"
 	"encoding/json"
+	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"strings"
@@ -125,6 +127,51 @@ func newMux(st *store.Store, cs *ConfigStore, mgr *Manager) *http.ServeMux {
 			return
 		}
 		writeJSON(w, series)
+	})
+
+	// --- Remote host proxy ---
+	// GET/POST /api/remote/config — get or set remote host URL
+	// GET /api/remote/* — proxy to host's API
+
+	mux.HandleFunc("/api/remote/config", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(w, map[string]string{"host_url": cs.RemoteHost()})
+		case http.MethodPost:
+			var body struct {
+				HostURL string `json:"host_url"`
+			}
+			if !decodeJSON(w, r, &body) {
+				return
+			}
+			cs.SetRemoteHost(body.HostURL)
+			writeJSON(w, map[string]string{"host_url": body.HostURL})
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/api/remote/", func(w http.ResponseWriter, r *http.Request) {
+		hostURL := cs.RemoteHost()
+		if hostURL == "" {
+			http.Error(w, "no remote host configured", http.StatusBadRequest)
+			return
+		}
+		path := strings.TrimPrefix(r.URL.Path, "/api/remote")
+		target := hostURL + "/api" + path
+		if r.URL.RawQuery != "" {
+			target += "?" + r.URL.RawQuery
+		}
+
+		resp, err := http.Get(target)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("proxy error: %v", err), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body)
 	})
 
 	return mux
