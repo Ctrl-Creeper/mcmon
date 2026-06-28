@@ -33,7 +33,7 @@
   <table id="targetsTable">
     <thead><tr>
       <th style="width:32px"><input type="checkbox" id="selectAll"></th>
-      <th>Status</th><th>Name</th><th>Host</th><th>Interval</th><th>Burst</th><th>Timeout</th><th></th>
+      <th>Status</th><th>Name</th><th>Host</th><th>Enabled monitors</th><th>Timeout</th><th></th>
     </tr></thead>
     <tbody></tbody>
   </table>
@@ -53,11 +53,30 @@
       <label>Port<input type="number" id="f_port" required value="25565"></label>
     </div>
     <div class="row" style="margin-bottom:16px;">
-      <label>Ping period (sec)<input type="number" id="f_interval" required value="60" min="5"></label>
-      <label>Probes / burst<input type="number" id="f_burst" required value="5" min="1" max="20"></label>
       <label>Timeout (ms)<input type="number" id="f_timeout" required value="1500" min="100"></label>
-      <label>Probe gap (ms)<input type="number" id="f_gap" required value="1500" min="0"></label>
-      <label>Protocol ver.<input type="number" id="f_proto" required value="760"></label>
+    </div>
+    <div class="monitor-settings">
+      <div class="monitor-row">
+        <label class="check-label"><input type="checkbox" id="m_online_enabled" checked> Online</label>
+        <label>Interval (sec)<input type="number" id="m_online_interval" value="60" min="5"></label>
+      </div>
+      <div class="monitor-row">
+        <label class="check-label"><input type="checkbox" id="m_players_enabled" checked> Players</label>
+        <label>Interval (sec)<input type="number" id="m_players_interval" value="60" min="5"></label>
+      </div>
+      <div class="monitor-row">
+        <label class="check-label"><input type="checkbox" id="m_latency_enabled" checked> Latency</label>
+        <label>Interval (sec)<input type="number" id="m_latency_interval" value="60" min="5"></label>
+        <label>Probes / burst<input type="number" id="m_latency_burst" value="5" min="1" max="20"></label>
+        <label>Probe gap (ms)<input type="number" id="m_latency_gap" value="1500" min="0"></label>
+        <label>Protocol ver.<input type="number" id="m_latency_proto" value="760"></label>
+      </div>
+      <div class="monitor-row">
+        <label class="check-label"><input type="checkbox" id="m_loss_enabled" checked> Loss</label>
+        <label>Interval (sec)<input type="number" id="m_loss_interval" value="60" min="5"></label>
+        <label>Probes / burst<input type="number" id="m_loss_burst" value="5" min="1" max="20"></label>
+        <label>Probe gap (ms)<input type="number" id="m_loss_gap" value="1500" min="0"></label>
+      </div>
     </div>
     <div class="row">
       <button class="btn primary" type="submit" id="f_submit">Add server</button>
@@ -126,8 +145,7 @@ function renderTable() {
       <td><span class="dot online"></span></td>
       <td><strong>${esc(t.name || t.id)}</strong></td>
       <td>${esc(t.host)}:${t.port}</td>
-      <td>${t.interval_sec}s</td>
-      <td>${t.probes_per_burst}</td>
+      <td>${enabledMonitorLabels(t).join(', ') || 'None'}</td>
       <td>${t.timeout_ms}ms</td>
       <td class="row">
         <button class="btn ghost" data-edit="${t.id}">Edit</button>
@@ -143,6 +161,30 @@ function renderTable() {
   tbody.querySelectorAll('[data-del]').forEach(b => b.onclick = () => deleteTarget(b.dataset.del));
   document.getElementById('selectAll').checked = targetsCache.length > 0 && selected.size === targetsCache.length;
   updateSelectInfo();
+}
+
+function monitorDefaults(t) {
+  const legacyInterval = t.interval_sec || 60;
+  const legacyBurst = t.probes_per_burst || 5;
+  const legacyGap = t.probe_gap_ms ?? 1500;
+  const legacyProto = t.protocol_version || 760;
+  const m = t.monitors || {};
+  return {
+    online: { enabled: true, interval_sec: legacyInterval, ...(m.online || {}) },
+    players: { enabled: true, interval_sec: legacyInterval, ...(m.players || {}) },
+    latency: { enabled: true, interval_sec: legacyInterval, probes_per_burst: legacyBurst, probe_gap_ms: legacyGap, protocol_version: legacyProto, ...(m.latency || {}) },
+    loss: { enabled: true, interval_sec: legacyInterval, probes_per_burst: legacyBurst, probe_gap_ms: legacyGap, protocol_version: legacyProto, ...(m.loss || {}) },
+  };
+}
+
+function enabledMonitorLabels(t) {
+  const m = monitorDefaults(t);
+  return [
+    m.online.enabled ? 'Online' : null,
+    m.players.enabled ? 'Players' : null,
+    m.latency.enabled ? 'Latency' : null,
+    m.loss.enabled ? 'Loss' : null,
+  ].filter(Boolean);
 }
 
 function updateSelectInfo() {
@@ -165,11 +207,9 @@ function fillForm(id) {
   document.getElementById('f_name').value = t.name || '';
   document.getElementById('f_host').value = t.host;
   document.getElementById('f_port').value = t.port;
-  document.getElementById('f_interval').value = t.interval_sec;
-  document.getElementById('f_burst').value = t.probes_per_burst;
   document.getElementById('f_timeout').value = t.timeout_ms;
-  document.getElementById('f_gap').value = t.probe_gap_ms;
-  document.getElementById('f_proto').value = t.protocol_version;
+  const m = monitorDefaults(t);
+  setMonitorForm(m);
   document.getElementById('formTitle').textContent = 'Edit server';
   document.getElementById('f_submit').textContent = 'Save changes';
   document.getElementById('f_cancel').style.display = '';
@@ -181,16 +221,55 @@ function fillForm(id) {
 function resetForm() {
   document.getElementById('targetForm').reset();
   document.getElementById('f_editId').value = '';
-  document.getElementById('f_interval').value = 60;
-  document.getElementById('f_burst').value = 5;
   document.getElementById('f_timeout').value = 1500;
-  document.getElementById('f_gap').value = 1500;
-  document.getElementById('f_proto').value = 760;
+  setMonitorForm(monitorDefaults({}));
   document.getElementById('formTitle').textContent = 'Add server';
   document.getElementById('f_submit').textContent = 'Add server';
   document.getElementById('f_cancel').style.display = 'none';
   document.getElementById('formErr').textContent = '';
   document.getElementById('formOk').textContent = '';
+}
+
+function setMonitorForm(m) {
+  document.getElementById('m_online_enabled').checked = !!m.online.enabled;
+  document.getElementById('m_online_interval').value = m.online.interval_sec || 60;
+  document.getElementById('m_players_enabled').checked = !!m.players.enabled;
+  document.getElementById('m_players_interval').value = m.players.interval_sec || 60;
+  document.getElementById('m_latency_enabled').checked = !!m.latency.enabled;
+  document.getElementById('m_latency_interval').value = m.latency.interval_sec || 60;
+  document.getElementById('m_latency_burst').value = m.latency.probes_per_burst || 5;
+  document.getElementById('m_latency_gap').value = m.latency.probe_gap_ms ?? 1500;
+  document.getElementById('m_latency_proto').value = m.latency.protocol_version || 760;
+  document.getElementById('m_loss_enabled').checked = !!m.loss.enabled;
+  document.getElementById('m_loss_interval').value = m.loss.interval_sec || 60;
+  document.getElementById('m_loss_burst').value = m.loss.probes_per_burst || 5;
+  document.getElementById('m_loss_gap').value = m.loss.probe_gap_ms ?? 1500;
+}
+
+function readMonitorForm() {
+  return {
+    online: {
+      enabled: document.getElementById('m_online_enabled').checked,
+      interval_sec: parseInt(document.getElementById('m_online_interval').value, 10),
+    },
+    players: {
+      enabled: document.getElementById('m_players_enabled').checked,
+      interval_sec: parseInt(document.getElementById('m_players_interval').value, 10),
+    },
+    latency: {
+      enabled: document.getElementById('m_latency_enabled').checked,
+      interval_sec: parseInt(document.getElementById('m_latency_interval').value, 10),
+      probes_per_burst: parseInt(document.getElementById('m_latency_burst').value, 10),
+      probe_gap_ms: parseInt(document.getElementById('m_latency_gap').value, 10),
+      protocol_version: parseInt(document.getElementById('m_latency_proto').value, 10),
+    },
+    loss: {
+      enabled: document.getElementById('m_loss_enabled').checked,
+      interval_sec: parseInt(document.getElementById('m_loss_interval').value, 10),
+      probes_per_burst: parseInt(document.getElementById('m_loss_burst').value, 10),
+      probe_gap_ms: parseInt(document.getElementById('m_loss_gap').value, 10),
+    },
+  };
 }
 
 document.getElementById('f_cancel').onclick = resetForm;
@@ -204,12 +283,13 @@ document.getElementById('targetForm').addEventListener('submit', async (e) => {
     name: document.getElementById('f_name').value.trim(),
     host: document.getElementById('f_host').value.trim(),
     port: parseInt(document.getElementById('f_port').value, 10),
-    interval_sec: parseInt(document.getElementById('f_interval').value, 10),
-    probes_per_burst: parseInt(document.getElementById('f_burst').value, 10),
     timeout_ms: parseInt(document.getElementById('f_timeout').value, 10),
-    probe_gap_ms: parseInt(document.getElementById('f_gap').value, 10),
-    protocol_version: parseInt(document.getElementById('f_proto').value, 10),
+    monitors: readMonitorForm(),
   };
+  payload.interval_sec = payload.monitors.latency.interval_sec;
+  payload.probes_per_burst = payload.monitors.latency.probes_per_burst;
+  payload.probe_gap_ms = payload.monitors.latency.probe_gap_ms;
+  payload.protocol_version = payload.monitors.latency.protocol_version;
   let url, method;
   if (editId) {
     payload.id = editId;

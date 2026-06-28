@@ -56,7 +56,7 @@ func main() {
 
 	desktop := &DesktopApp{}
 	err = wails.Run(&options.App{
-		Title:             "MC Latency Monitor",
+		Title:             "MC Server Monitor",
 		Width:             1180,
 		Height:            820,
 		MinWidth:          900,
@@ -90,7 +90,7 @@ func parseDesktopCommand(args []string) desktopCommand {
 		log.Fatal(err)
 	}
 	if len(args) > 0 && args[0] == "serve" {
-		fs := flag.NewFlagSet("MC Latency Monitor serve", flag.ExitOnError)
+		fs := flag.NewFlagSet("MC Server Monitor serve", flag.ExitOnError)
 		configPath := fs.String("config", defaultConfigPath, "path to config file")
 		fs.Parse(args[1:])
 		return desktopCommand{mode: desktopModeServe, configPath: *configPath}
@@ -152,6 +152,12 @@ func writeDesktopConfig(configPath, dbPath string) {
 				"probes_per_burst": 5,
 				"probe_gap_ms":     1500,
 				"protocol_version": 760,
+				"monitors": map[string]any{
+					"online":  map[string]any{"enabled": true, "interval_sec": 60},
+					"players": map[string]any{"enabled": true, "interval_sec": 60},
+					"latency": map[string]any{"enabled": true, "interval_sec": 60, "probes_per_burst": 5, "probe_gap_ms": 1500, "protocol_version": 760},
+					"loss":    map[string]any{"enabled": true, "interval_sec": 60, "probes_per_burst": 5, "probe_gap_ms": 1500},
+				},
 			},
 		},
 	}

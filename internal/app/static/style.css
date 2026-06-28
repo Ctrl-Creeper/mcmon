@@ -247,6 +247,32 @@ label {
   text-transform: uppercase; letter-spacing: 0.3px;
 }
 
+.check-label {
+  flex-direction: row;
+  align-items: center;
+  min-width: 110px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text);
+}
+
+.monitor-settings {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.monitor-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+}
+
 input[type=checkbox] {
   width: 16px; height: 16px; cursor: pointer;
   accent-color: var(--accent);

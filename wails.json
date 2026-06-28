@@ -1,12 +1,12 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
   "name": "mc-latency-monitor",
-  "outputfilename": "MC Latency Monitor",
+  "outputfilename": "MC Server Monitor",
   "info": {
-    "productName": "MC Latency Monitor",
+    "productName": "MC Server Monitor",
     "productVersion": "1.0.0",
     "copyright": "Copyright 2026 Lewis Wu",
-    "comments": "Minecraft latency monitor"
+    "comments": "Minecraft server monitor"
   },
   "darwin": {
     "bundleIdentifier": "com.lewiswu.mc-latency-monitor"

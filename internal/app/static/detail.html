@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Server Detail - MC Latency Monitor</title>
+<title>Server Detail - MC Server Monitor</title>
 <link rel="stylesheet" href="/style.css" />
 <script src="/vendor/chart.umd.js"></script>
 <script src="/vendor/chartjs-plugin-zoom.min.js"></script>
@@ -15,6 +15,11 @@
   .detail-header .name { font-size: 22px; font-weight: 700; }
   .detail-header .host { font-size: 14px; color: var(--text-faint); }
   .detail-sub { font-size: 12px; color: var(--text-faint); margin-bottom: 16px; }
+  .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+  .metric-card { cursor: pointer; min-height: 190px; }
+  .metric-card h3 { font-size: 13px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 4px; }
+  .metric-card .big { font-size: 28px; font-weight: 750; margin-bottom: 10px; }
+  .metric-card canvas { height: 92px !important; }
 </style>
 </head>
 <body>
@@ -30,53 +35,61 @@
 </nav>
 
 <div class="wrap">
+  <a href="/" class="back-link" id="backLink">← Back to Dashboard</a>
 
-<a href="/" class="back-link">← Back to Dashboard</a>
-
-<!-- Server info -->
-<div class="card" id="infoCard">
-  <div class="detail-header">
-    <span class="dot" id="statusDot"></span>
-    <span class="name" id="serverName">—</span>
-    <span class="host" id="serverHost">—</span>
+  <div class="card" id="infoCard">
+    <div class="detail-header">
+      <span class="dot" id="statusDot"></span>
+      <span class="name" id="serverName">—</span>
+      <span class="host" id="serverHost">—</span>
+    </div>
+    <div class="detail-sub" id="serverConfig"></div>
   </div>
-  <div class="detail-sub" id="serverConfig"></div>
-</div>
 
-<!-- Stats -->
-<div class="stats-row" id="statsRow">
-  <div class="stat-card"><div class="stat-label">Status</div><div class="stat-value" id="statStatus">—</div></div>
-  <div class="stat-card"><div class="stat-label">Current Median</div><div class="stat-value" id="statMedian">—</div></div>
-  <div class="stat-card"><div class="stat-label">Current Min</div><div class="stat-value" id="statMin">—</div></div>
-  <div class="stat-card"><div class="stat-label">Current Max</div><div class="stat-value" id="statMax">—</div></div>
-  <div class="stat-card"><div class="stat-label">Avg Loss</div><div class="stat-value" id="statLoss">—</div></div>
-  <div class="stat-card"><div class="stat-label">Samples</div><div class="stat-value" id="statSamples">—</div></div>
-</div>
-
-<!-- Controls -->
-<div class="card">
-  <div class="row">
-    <div class="row" id="rangeButtons"></div>
-    <span class="spacer"></span>
-    <button class="btn ghost" id="resetZoom">↺ Reset zoom</button>
+  <div id="overviewView">
+    <div class="metric-grid" id="metricGrid"></div>
   </div>
-</div>
 
-<!-- Chart -->
-<div class="card">
-  <div style="position:relative;">
-    <canvas id="chart" height="110"></canvas>
+  <div id="metricView" style="display:none;">
+    <div class="stats-row">
+      <div class="stat-card"><div class="stat-label" id="metricLabel">Metric</div><div class="stat-value" id="metricCurrent">—</div></div>
+      <div class="stat-card"><div class="stat-label">Samples</div><div class="stat-value" id="metricSamples">—</div></div>
+      <div class="stat-card"><div class="stat-label">Range</div><div class="stat-value" id="metricRange">—</div></div>
+    </div>
+    <div class="card">
+      <div class="row">
+        <div class="row" id="rangeButtons"></div>
+        <span class="spacer"></span>
+        <button class="btn ghost" id="resetZoom">↺ Reset zoom</button>
+      </div>
+    </div>
+    <div class="card">
+      <canvas id="chart" height="110"></canvas>
+      <div class="muted" style="margin-top:12px;">
+        Scroll zoom · Drag pan · Shift+drag box zoom · Double-click reset.
+      </div>
+    </div>
   </div>
-  <div class="muted" style="margin-top:12px;">
-    Shaded band: min–max &nbsp;|&nbsp; Green line: median &nbsp;|&nbsp; Red bars: packet loss %.
-    &nbsp; <strong>Scroll</strong> zoom · <strong>Drag</strong> pan · <strong>Shift+drag</strong> box zoom · <strong>Double-click</strong> reset.
-  </div>
-</div>
-
 </div>
 
 <script>
-// ===== Theme =====
+const metricDefs = {
+  online: { label: 'Online', color: 'red' },
+  players: { label: 'Players', color: 'accent' },
+  latency: { label: 'Latency', color: 'green' },
+  loss: { label: 'Loss', color: 'red' },
+};
+const ranges = ['1h','6h','12h','1d','7d','30d'];
+const params = new URLSearchParams(location.search);
+const targetId = params.get('id');
+let currentMetric = params.get('metric');
+let currentRange = '1h';
+let targetInfo = null;
+let metricCache = {};
+let charts = {};
+let chart = null;
+if (!targetId) location.href = '/';
+
 const themeBtn = document.getElementById('themeBtn');
 function applyTheme(dark) {
   document.body.classList.toggle('dark', dark);
@@ -86,33 +99,17 @@ function applyTheme(dark) {
 themeBtn.onclick = () => { applyTheme(!document.body.classList.contains('dark')); refresh(); };
 applyTheme(localStorage.getItem('mcmon-theme') === 'dark' || (!localStorage.getItem('mcmon-theme') && matchMedia('(prefers-color-scheme:dark)').matches));
 
-function chartColors() {
+function colors() {
   const dark = document.body.classList.contains('dark');
   return {
-    band: dark ? 'rgba(140,120,255,0.15)' : 'rgba(100,80,200,0.12)',
-    bandBorder: dark ? 'rgba(140,120,255,0.3)' : 'rgba(100,80,200,0.25)',
-    median: dark ? '#8be98b' : '#00a040',
-    loss: dark ? 'rgba(255,80,80,0.5)' : 'rgba(220,40,40,0.4)',
+    green: dark ? '#8be98b' : '#00a040',
+    red: dark ? '#ff7777' : '#d92828',
+    accent: dark ? '#b8a6ff' : '#6b4ee6',
     grid: dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
-    tick: dark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)',
+    tick: dark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.45)',
   };
 }
 
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-// ===== State =====
-const params = new URLSearchParams(location.search);
-const targetId = params.get('id');
-if (!targetId) { location.href = '/'; }
-
-const ranges = ['1h','6h','12h','1d','7d','30d'];
-let currentRange = '1h';
-let chart = null;
-let targetInfo = null;
-
-// ===== Load server info =====
 async function loadTarget() {
   const targets = await fetch('/api/targets').then(r => r.json()) || [];
   targetInfo = (targets || []).find(t => t.id === targetId);
@@ -120,11 +117,96 @@ async function loadTarget() {
     document.getElementById('serverName').textContent = 'Server not found';
     return;
   }
-  document.title = (targetInfo.name || targetInfo.id) + ' - MC Latency Monitor';
+  document.title = `${targetInfo.name || targetInfo.id} - MC Server Monitor`;
   document.getElementById('serverName').textContent = targetInfo.name || targetInfo.id;
-  document.getElementById('serverHost').textContent = targetInfo.host + ':' + targetInfo.port;
-  document.getElementById('serverConfig').textContent =
-    `Interval: ${targetInfo.interval_sec}s · Burst: ${targetInfo.probes_per_burst} probes · Timeout: ${targetInfo.timeout_ms}ms · Gap: ${targetInfo.probe_gap_ms}ms`;
+  document.getElementById('serverHost').textContent = `${targetInfo.host}:${targetInfo.port}`;
+  document.getElementById('serverConfig').textContent = `Timeout: ${targetInfo.timeout_ms}ms`;
+}
+
+function monitorDefaults(t) {
+  const m = t.monitors || {};
+  const interval = t.interval_sec || 60;
+  return {
+    online: { enabled: true, interval_sec: interval, ...(m.online || {}) },
+    players: { enabled: true, interval_sec: interval, ...(m.players || {}) },
+    latency: { enabled: true, interval_sec: interval, ...(m.latency || {}) },
+    loss: { enabled: true, interval_sec: interval, ...(m.loss || {}) },
+  };
+}
+
+function enabledMetrics() {
+  const m = monitorDefaults(targetInfo || {});
+  return Object.keys(metricDefs).filter(k => m[k] && m[k].enabled);
+}
+
+async function loadMetric(metric, range = '1h') {
+  const data = await fetch(`/api/metrics?target=${encodeURIComponent(targetId)}&metric=${metric}&range=${range}`).then(r => r.json());
+  metricCache[`${metric}:${range}`] = data || [];
+  return data || [];
+}
+
+async function refresh() {
+  if (!targetInfo) return;
+  if (currentMetric) await renderMetricView();
+  else await renderOverview();
+}
+
+async function renderOverview() {
+  document.getElementById('overviewView').style.display = '';
+  document.getElementById('metricView').style.display = 'none';
+  document.getElementById('backLink').href = '/';
+  document.getElementById('backLink').textContent = '← Back to Dashboard';
+  Object.values(charts).forEach(c => c.destroy());
+  charts = {};
+
+  await Promise.all(enabledMetrics().map(m => loadMetric(m)));
+  updateStatusDot();
+  const grid = document.getElementById('metricGrid');
+  grid.innerHTML = enabledMetrics().map(metric => metricCardHTML(metric)).join('');
+  enabledMetrics().forEach(renderSmallChart);
+  grid.querySelectorAll('[data-metric]').forEach(card => {
+    card.onclick = () => { location.href = `/detail.html?id=${encodeURIComponent(targetId)}&metric=${card.dataset.metric}`; };
+  });
+}
+
+function metricCardHTML(metric) {
+  const arr = metricCache[`${metric}:1h`] || [];
+  const last = arr.length ? arr[arr.length - 1] : null;
+  return `
+    <div class="card metric-card" data-metric="${metric}">
+      <h3>${metricDefs[metric].label}</h3>
+      <div class="big">${metricValue(metric, last)}</div>
+      <canvas id="small-${metric}"></canvas>
+    </div>
+  `;
+}
+
+function renderSmallChart(metric) {
+  const arr = metricCache[`${metric}:1h`] || [];
+  const cc = colors();
+  const def = metricDefs[metric];
+  charts[metric] = new Chart(document.getElementById(`small-${metric}`), {
+    type: metric === 'online' ? 'bar' : 'line',
+    data: { labels: arr.map(x => new Date(x.Ts * 1000).toLocaleTimeString()), datasets: [{ data: arr.map(x => x.Value), borderColor: cc[def.color], backgroundColor: metric === 'online' ? cc[def.color] : 'transparent', borderWidth: 1.5, pointRadius: 0, tension: 0.3 }] },
+    options: { animation: false, responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { enabled: false } }, scales: { x: { display: false }, y: { display: false, min: metric === 'online' ? 0 : undefined, max: metric === 'online' ? 1 : undefined } } },
+  });
+}
+
+async function renderMetricView() {
+  if (!metricDefs[currentMetric]) currentMetric = 'latency';
+  document.getElementById('overviewView').style.display = 'none';
+  document.getElementById('metricView').style.display = '';
+  document.getElementById('backLink').href = `/detail.html?id=${encodeURIComponent(targetId)}`;
+  document.getElementById('backLink').textContent = '← Back to Server Overview';
+  renderRangeButtons();
+  const arr = await loadMetric(currentMetric, currentRange);
+  updateStatusDot();
+  const last = arr.length ? arr[arr.length - 1] : null;
+  document.getElementById('metricLabel').textContent = metricDefs[currentMetric].label;
+  document.getElementById('metricCurrent').textContent = metricValue(currentMetric, last);
+  document.getElementById('metricSamples').textContent = arr.length;
+  document.getElementById('metricRange').textContent = currentRange;
+  renderMainChart(arr);
 }
 
 function renderRangeButtons() {
@@ -134,94 +216,68 @@ function renderRangeButtons() {
     const b = document.createElement('button');
     b.className = 'btn' + (r === currentRange ? ' active' : '');
     b.textContent = r;
-    b.onclick = () => { currentRange = r; renderRangeButtons(); refresh(); };
+    b.onclick = () => { currentRange = r; renderMetricView(); };
     c.appendChild(b);
   });
 }
 
-document.getElementById('resetZoom').onclick = () => { if (chart) chart.resetZoom(); };
-
-async function refresh() {
-  if (!targetId) return;
-  const data = await fetch(`/api/series?target=${encodeURIComponent(targetId)}&range=${currentRange}`).then(r => r.json());
-  const arr = data || [];
-
-  // Update stats
-  const last = arr.length ? arr[arr.length - 1] : null;
-  const isOnline = last && last.P50 != null && last.LossPct < 1;
-
-  const dot = document.getElementById('statusDot');
-  dot.className = 'dot ' + (isOnline ? 'online' : 'offline');
-
-  const statusEl = document.getElementById('statStatus');
-  statusEl.textContent = isOnline ? 'Online' : 'Offline';
-  statusEl.className = 'stat-value ' + (isOnline ? 'green' : 'red');
-
-  document.getElementById('statMedian').textContent = last && last.P50 != null ? last.P50.toFixed(1) + ' ms' : '—';
-  document.getElementById('statMin').textContent = last && last.Min != null ? last.Min.toFixed(1) + ' ms' : '—';
-  document.getElementById('statMax').textContent = last && last.Max != null ? last.Max.toFixed(1) + ' ms' : '—';
-
-  const avgLoss = arr.length ? arr.reduce((s, d) => s + d.LossPct, 0) / arr.length * 100 : 0;
-  const lossEl = document.getElementById('statLoss');
-  lossEl.textContent = avgLoss.toFixed(1) + '%';
-  lossEl.className = 'stat-value ' + (avgLoss < 1 ? 'green' : avgLoss < 10 ? '' : 'red');
-
-  document.getElementById('statSamples').textContent = arr.length;
-
-  // Chart
-  const labels = arr.map(d => new Date(d.Ts * 1000).toLocaleString());
-  const minD = arr.map(d => d.Min);
-  const p50  = arr.map(d => d.P50);
-  const maxD = arr.map(d => d.Max);
-  const loss = arr.map(d => d.LossPct * 100);
-
-  const cc = chartColors();
-  const ctx = document.getElementById('chart').getContext('2d');
+function renderMainChart(arr) {
   if (chart) chart.destroy();
-  chart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [
-        { label: 'max', data: maxD, borderColor: cc.bandBorder, backgroundColor: cc.band, fill: '+1', pointRadius: 0, borderWidth: 1, yAxisID: 'y' },
-        { label: 'min', data: minD, borderColor: cc.bandBorder, backgroundColor: cc.band, fill: false, pointRadius: 0, borderWidth: 1, yAxisID: 'y' },
-        { label: 'median', data: p50, borderColor: cc.median, borderWidth: 2, backgroundColor: 'transparent', pointRadius: 0, tension: 0.3, yAxisID: 'y' },
-        { label: 'loss %', data: loss, type: 'bar', backgroundColor: cc.loss, borderRadius: 2, yAxisID: 'y1' },
-      ]
-    },
+  const cc = colors();
+  const def = metricDefs[currentMetric];
+  const data = arr.map(x => x.Value);
+  chart = new Chart(document.getElementById('chart'), {
+    type: currentMetric === 'online' ? 'bar' : 'line',
+    data: { labels: arr.map(x => new Date(x.Ts * 1000).toLocaleString()), datasets: [{ label: metricDefs[currentMetric].label, data, borderColor: cc[def.color], backgroundColor: currentMetric === 'online' ? cc[def.color] : 'transparent', borderWidth: 2, pointRadius: 0, tension: 0.25 }] },
     options: {
       animation: false,
       responsive: true,
       interaction: { mode: 'index', intersect: false },
       scales: {
-        x: { ticks: { color: cc.tick, maxTicksLimit: 14, font: { size: 11 } }, grid: { color: cc.grid } },
-        y: { title: { display: true, text: 'ms', color: cc.tick, font: { size: 12 } }, min: 0, ticks: { color: cc.tick, font: { size: 11 } }, grid: { color: cc.grid } },
-        y1: { position: 'right', min: 0, max: 100, title: { display: true, text: 'loss %', color: cc.tick, font: { size: 12 } }, ticks: { color: cc.tick, font: { size: 11 } }, grid: { drawOnChartArea: false } },
+        x: { ticks: { color: cc.tick, maxTicksLimit: 14 }, grid: { color: cc.grid } },
+        y: { min: currentMetric === 'online' ? 0 : 0, max: currentMetric === 'online' ? 1 : undefined, ticks: { color: cc.tick }, grid: { color: cc.grid } },
       },
       plugins: {
-        legend: { labels: { color: cc.tick, font: { size: 12 }, usePointStyle: true, pointStyle: 'circle' } },
-        tooltip: { backgroundColor: 'rgba(0,0,0,0.8)', titleFont: { size: 12 }, bodyFont: { size: 12 }, cornerRadius: 8, padding: 10 },
+        legend: { labels: { color: cc.tick } },
         zoom: {
           pan: { enabled: true, mode: 'x' },
-          zoom: {
-            wheel: { enabled: true, speed: 0.05 },
-            pinch: { enabled: true },
-            drag: { enabled: true, backgroundColor: 'rgba(100,80,200,0.08)', borderColor: 'rgba(100,80,200,0.3)', borderWidth: 1, modifierKey: 'shift' },
-            mode: 'x',
-          },
+          zoom: { wheel: { enabled: true, speed: 0.05 }, pinch: { enabled: true }, drag: { enabled: true, modifierKey: 'shift' }, mode: 'x' },
         },
       },
     },
   });
 }
 
+document.getElementById('resetZoom').onclick = () => { if (chart) chart.resetZoom(); };
+
+function updateStatusDot() {
+  const online = metricCache['online:1h'] || metricCache[`online:${currentRange}`] || [];
+  const last = online.length ? online[online.length - 1] : null;
+  document.getElementById('statusDot').className = 'dot ' + (last && last.Value === 1 ? 'online' : 'offline');
+}
+
+function metricValue(metric, sm) {
+  if (!sm) return '—';
+  if (metric === 'online') return sm.Value === 1 ? 'Online' : 'Offline';
+  if (metric === 'players') {
+    if (sm.Value == null) return '—';
+    const extra = parseExtra(sm);
+    return extra.max ? `${sm.Value}/${extra.max}` : String(sm.Value);
+  }
+  if (metric === 'latency') return sm.Value != null ? `${sm.Value.toFixed(1)} ms` : '—';
+  if (metric === 'loss') return sm.Value != null ? `${(sm.Value * 100).toFixed(1)}%` : '—';
+  return '—';
+}
+
+function parseExtra(sm) {
+  try { return sm && sm.Extra ? JSON.parse(sm.Extra) : {}; } catch { return {}; }
+}
+
 (async () => {
   await loadTarget();
-  renderRangeButtons();
   await refresh();
   setInterval(refresh, 30000);
 })();
 </script>
-
 </body>
 </html>

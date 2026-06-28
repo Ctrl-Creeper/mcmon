@@ -10,16 +10,39 @@ import (
 	"sync"
 )
 
+const defaultProtocolVersion = 760
+
 type Target struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	Host            string `json:"host"`
-	Port            int    `json:"port"`
-	IntervalSec     int    `json:"interval_sec"`     // how often to run a probe burst
-	TimeoutMs       int    `json:"timeout_ms"`       // per-probe connect/read timeout
-	ProbesPerBurst  int    `json:"probes_per_burst"` // samples taken per burst
-	ProbeGapMs      int    `json:"probe_gap_ms"`     // delay between samples within a burst
-	ProtocolVersion int    `json:"protocol_version"`
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	Host            string   `json:"host"`
+	Port            int      `json:"port"`
+	TimeoutMs       int      `json:"timeout_ms"` // shared default timeout
+	Monitors        Monitors `json:"monitors"`
+	IntervalSec     int      `json:"interval_sec"`     // how often to run a probe burst
+	ProbesPerBurst  int      `json:"probes_per_burst"` // samples taken per burst
+	ProbeGapMs      int      `json:"probe_gap_ms"`     // delay between samples within a burst
+	ProtocolVersion int      `json:"protocol_version"`
+}
+
+type Monitors struct {
+	Online  SimpleMonitor `json:"online"`
+	Players SimpleMonitor `json:"players"`
+	Latency ProbeMonitor  `json:"latency"`
+	Loss    ProbeMonitor  `json:"loss"`
+}
+
+type SimpleMonitor struct {
+	Enabled     bool `json:"enabled"`
+	IntervalSec int  `json:"interval_sec"`
+}
+
+type ProbeMonitor struct {
+	Enabled         bool `json:"enabled"`
+	IntervalSec     int  `json:"interval_sec"`
+	ProbesPerBurst  int  `json:"probes_per_burst"`
+	ProbeGapMs      int  `json:"probe_gap_ms"`
+	ProtocolVersion int  `json:"protocol_version,omitempty"`
 }
 
 func (t Target) normalized() Target {
@@ -36,9 +59,80 @@ func (t Target) normalized() Target {
 		t.ProbeGapMs = 0
 	}
 	if t.ProtocolVersion == 0 {
-		t.ProtocolVersion = 760
+		t.ProtocolVersion = defaultProtocolVersion
 	}
+	t.Monitors = t.normalizedMonitors()
 	return t
+}
+
+func (t Target) normalizedMonitors() Monitors {
+	interval := t.IntervalSec
+	if interval <= 0 {
+		interval = 60
+	}
+	burst := t.ProbesPerBurst
+	if burst <= 0 {
+		burst = 5
+	}
+	gap := t.ProbeGapMs
+	if gap < 0 {
+		gap = 0
+	}
+	proto := t.ProtocolVersion
+	if proto == 0 {
+		proto = defaultProtocolVersion
+	}
+
+	m := t.Monitors
+	if m.Online.IntervalSec <= 0 {
+		m.Online.IntervalSec = interval
+	}
+	if m.Players.IntervalSec <= 0 {
+		m.Players.IntervalSec = interval
+	}
+	if m.Latency.IntervalSec <= 0 {
+		m.Latency.IntervalSec = interval
+	}
+	if m.Latency.ProbesPerBurst <= 0 {
+		m.Latency.ProbesPerBurst = burst
+	}
+	if m.Latency.ProbeGapMs <= 0 {
+		m.Latency.ProbeGapMs = gap
+	}
+	if m.Latency.ProtocolVersion == 0 {
+		m.Latency.ProtocolVersion = proto
+	}
+	if m.Loss.IntervalSec <= 0 {
+		m.Loss.IntervalSec = interval
+	}
+	if m.Loss.ProbesPerBurst <= 0 {
+		m.Loss.ProbesPerBurst = burst
+	}
+	if m.Loss.ProbeGapMs <= 0 {
+		m.Loss.ProbeGapMs = gap
+	}
+	if m.Loss.ProtocolVersion == 0 {
+		m.Loss.ProtocolVersion = proto
+	}
+
+	if !t.hasExplicitMonitors() {
+		m.Online.Enabled = true
+		m.Players.Enabled = true
+		m.Latency.Enabled = true
+		m.Loss.Enabled = true
+	}
+	return m
+}
+
+func (t Target) hasExplicitMonitors() bool {
+	return t.Monitors.Online.Enabled ||
+		t.Monitors.Players.Enabled ||
+		t.Monitors.Latency.Enabled ||
+		t.Monitors.Loss.Enabled ||
+		t.Monitors.Online.IntervalSec > 0 ||
+		t.Monitors.Players.IntervalSec > 0 ||
+		t.Monitors.Latency.IntervalSec > 0 ||
+		t.Monitors.Loss.IntervalSec > 0
 }
 
 func generateID() string {
@@ -74,7 +168,13 @@ func defaultConfig() Config {
 				ID: "example", Name: "Example Server",
 				Host: "mc.example.com", Port: 25565,
 				IntervalSec: 60, TimeoutMs: 1500, ProbesPerBurst: 5, ProbeGapMs: 1500,
-				ProtocolVersion: 760,
+				ProtocolVersion: defaultProtocolVersion,
+				Monitors: Monitors{
+					Online:  SimpleMonitor{Enabled: true, IntervalSec: 60},
+					Players: SimpleMonitor{Enabled: true, IntervalSec: 60},
+					Latency: ProbeMonitor{Enabled: true, IntervalSec: 60, ProbesPerBurst: 5, ProbeGapMs: 1500, ProtocolVersion: defaultProtocolVersion},
+					Loss:    ProbeMonitor{Enabled: true, IntervalSec: 60, ProbesPerBurst: 5, ProbeGapMs: 1500, ProtocolVersion: defaultProtocolVersion},
+				},
 			},
 		},
 	}

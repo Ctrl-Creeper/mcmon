@@ -1,8 +1,8 @@
-# MC Latency Monitor
+# MC Server Monitor
 
-MC Latency Monitor is a lightweight desktop monitor for Minecraft Java Edition
+MC Server Monitor is a lightweight desktop monitor for Minecraft Java Edition
 servers. It probes servers with the vanilla status/ping protocol, stores
-latency and loss history in SQLite, and shows the data in a bundled desktop UI.
+server status history in SQLite, and shows the data in a bundled desktop UI.
 
 The app can also run as a small background service so monitoring continues
 after the window is closed.
@@ -11,9 +11,9 @@ after the window is closed.
 
 - Native desktop app powered by Wails.
 - Minecraft Java Edition status/ping probing.
-- Per-server probe interval, timeout, burst size, and probe gap.
+- Per-metric enable switches and probe intervals, with latency-specific burst settings.
 - SQLite history storage.
-- Latency charts with min, median, max, and packet loss.
+- Metric charts for online state, players, latency, and packet loss.
 - Local-only default bind address: `127.0.0.1:8090`.
 - Optional remote host integration for pairing with `mcmon-host`.
 - Background mode:

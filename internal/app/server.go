@@ -131,6 +131,31 @@ func newMux(st *store.Store, cs *ConfigStore, mgr *Manager, configPath string) *
 		writeJSON(w, series)
 	})
 
+	mux.HandleFunc("/api/metrics", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		targetID := r.URL.Query().Get("target")
+		metric := r.URL.Query().Get("metric")
+		if strings.TrimSpace(targetID) == "" || strings.TrimSpace(metric) == "" {
+			http.Error(w, "target and metric are required", http.StatusBadRequest)
+			return
+		}
+		rangeKey := r.URL.Query().Get("range")
+		secs, ok := rangeToSeconds[rangeKey]
+		if !ok {
+			secs = 3600
+		}
+		since := time.Now().Unix() - secs
+		series, err := st.MetricSeries(targetID, metric, since)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, series)
+	})
+
 	mux.HandleFunc("/api/settings/background", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:

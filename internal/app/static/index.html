@@ -3,33 +3,24 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>MC Latency Monitor</title>
+<title>MC Server Monitor</title>
 <link rel="stylesheet" href="/style.css" />
 <script src="/vendor/chart.umd.js"></script>
 <style>
-  .server-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); gap: 16px; }
+  .server-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); gap: 16px; }
   .server-card { cursor: pointer; position: relative; }
   .server-card:hover { box-shadow: var(--shadow-lg); }
   .server-card .header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
   .server-card .name { font-size: 15px; font-weight: 600; }
   .server-card .host { font-size: 12px; color: var(--text-faint); }
-  .server-card .mini-stats { display: flex; gap: 16px; margin-bottom: 8px; font-size: 12px; }
-  .server-card .mini-stats .val { font-weight: 600; }
-  .server-card .mini-stats .val.green { color: var(--green); }
-  .server-card .mini-stats .val.red { color: var(--red); }
-  .server-card .chart-container { height: 120px; }
-  .server-card .click-hint {
-    position: absolute; top: 12px; right: 16px;
-    font-size: 11px; color: var(--text-faint);
-    opacity: 0; transition: opacity var(--motion-fast) var(--ease-smooth), transform var(--motion-fast) var(--ease-spring);
-    transform: translateX(4px);
-  }
-  .server-card:hover .click-hint { opacity: 1; transform: translateX(0); }
-  .empty-state {
-    text-align: center; padding: 60px 20px; color: var(--text-faint);
-  }
+  .metric-strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .metric-tile { border: 1px solid var(--border-light); border-radius: var(--radius); padding: 10px; background: var(--bg-input); min-height: 104px; }
+  .metric-title { display: flex; justify-content: space-between; gap: 8px; color: var(--text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; }
+  .metric-value { font-size: 20px; font-weight: 700; margin: 4px 0 6px; }
+  .metric-spark { height: 46px; }
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--text-faint); }
   .empty-state a { color: var(--accent); }
-  @media (max-width: 560px) { .server-grid { grid-template-columns: 1fr; } }
+  @media (max-width: 560px) { .server-grid, .metric-strip { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -45,25 +36,26 @@
 </nav>
 
 <div class="wrap">
+  <div class="stats-row" id="statsRow">
+    <div class="stat-card"><div class="stat-label">Servers</div><div class="stat-value accent" id="statTotal">-</div></div>
+    <div class="stat-card"><div class="stat-label">Online</div><div class="stat-value green" id="statOnline">-</div></div>
+    <div class="stat-card"><div class="stat-label">Players</div><div class="stat-value" id="statPlayers">-</div></div>
+    <div class="stat-card"><div class="stat-label">Avg Latency</div><div class="stat-value" id="statLatency">-</div></div>
+  </div>
 
-<!-- Summary stats -->
-<div class="stats-row" id="statsRow">
-  <div class="stat-card"><div class="stat-label">Servers</div><div class="stat-value accent" id="statTotal">-</div></div>
-  <div class="stat-card"><div class="stat-label">Online</div><div class="stat-value green" id="statOnline">-</div></div>
-  <div class="stat-card"><div class="stat-label">Offline</div><div class="stat-value red" id="statOffline">-</div></div>
-  <div class="stat-card"><div class="stat-label">Avg Median</div><div class="stat-value" id="statAvgMedian">-</div></div>
-</div>
-
-<!-- Server grid -->
-<div class="server-grid" id="grid"></div>
-<div class="empty-state" id="emptyState" style="display:none;">
-  No servers configured yet. <a href="/servers.html">Add one →</a>
-</div>
-
+  <div class="server-grid" id="grid"></div>
+  <div class="empty-state" id="emptyState" style="display:none;">
+    No servers configured yet. <a href="/servers.html">Add one →</a>
+  </div>
 </div>
 
 <script>
-// ===== Theme =====
+const metrics = {
+  online: { label: 'Online' },
+  players: { label: 'Players' },
+  latency: { label: 'Latency' },
+  loss: { label: 'Loss' },
+};
 const themeBtn = document.getElementById('themeBtn');
 function applyTheme(dark) {
   document.body.classList.toggle('dark', dark);
@@ -76,146 +68,143 @@ applyTheme(localStorage.getItem('mcmon-theme') === 'dark' || (!localStorage.getI
 function chartColors() {
   const dark = document.body.classList.contains('dark');
   return {
-    band: dark ? 'rgba(140,120,255,0.15)' : 'rgba(100,80,200,0.12)',
-    bandBorder: dark ? 'rgba(140,120,255,0.3)' : 'rgba(100,80,200,0.25)',
-    median: dark ? '#8be98b' : '#00a040',
-    loss: dark ? 'rgba(255,80,80,0.5)' : 'rgba(220,40,40,0.4)',
+    line: dark ? '#8be98b' : '#00a040',
+    red: dark ? '#ff7777' : '#d92828',
+    accent: dark ? '#b8a6ff' : '#6b4ee6',
     grid: dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
-    tick: dark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)',
   };
 }
 
 let targets = [];
-let seriesCache = {};
+let metricCache = {};
 let charts = {};
 
 async function loadAll() {
   targets = await fetch('/api/targets').then(r => r.json()) || [];
   if (!Array.isArray(targets)) targets = [];
-
-  await Promise.all(targets.map(async t => {
-    const data = await fetch(`/api/series?target=${encodeURIComponent(t.id)}&range=1h`).then(r => r.json());
-    seriesCache[t.id] = data || [];
-  }));
-
+  metricCache = {};
+  await Promise.all(targets.flatMap(t => enabledMetrics(t).map(async metric => {
+    const data = await fetch(`/api/metrics?target=${encodeURIComponent(t.id)}&metric=${metric}&range=1h`).then(r => r.json());
+    metricCache[`${t.id}:${metric}`] = data || [];
+  })));
   updateStats();
   renderAll();
 }
 
+function monitorDefaults(t) {
+  const m = t.monitors || {};
+  const interval = t.interval_sec || 60;
+  return {
+    online: { enabled: true, interval_sec: interval, ...(m.online || {}) },
+    players: { enabled: true, interval_sec: interval, ...(m.players || {}) },
+    latency: { enabled: true, interval_sec: interval, ...(m.latency || {}) },
+    loss: { enabled: true, interval_sec: interval, ...(m.loss || {}) },
+  };
+}
+
+function enabledMetrics(t) {
+  const m = monitorDefaults(t);
+  return Object.keys(metrics).filter(k => m[k] && m[k].enabled);
+}
+
 function updateStats() {
-  document.getElementById('statTotal').textContent = targets.length;
-  let online = 0, offline = 0, medianSum = 0, medianCount = 0;
+  let online = 0, players = 0, maxPlayers = 0, latencySum = 0, latencyCount = 0;
   targets.forEach(t => {
-    const arr = seriesCache[t.id] || [];
-    const last = arr.length ? arr[arr.length - 1] : null;
-    if (last && last.P50 != null && last.LossPct < 1) {
-      online++;
-      medianSum += last.P50;
-      medianCount++;
-    } else {
-      offline++;
+    const o = lastMetric(t.id, 'online');
+    if (o && o.Value === 1) online++;
+    const p = lastMetric(t.id, 'players');
+    if (p && p.Value != null) {
+      players += p.Value;
+      const extra = parseExtra(p);
+      if (extra.max) maxPlayers += extra.max;
     }
+    const l = lastMetric(t.id, 'latency');
+    if (l && l.Value != null) { latencySum += l.Value; latencyCount++; }
   });
+  document.getElementById('statTotal').textContent = targets.length;
   document.getElementById('statOnline').textContent = online;
-  document.getElementById('statOffline').textContent = offline;
-  const offEl = document.getElementById('statOffline');
-  offEl.className = 'stat-value ' + (offline > 0 ? 'red' : '');
-  document.getElementById('statAvgMedian').textContent = medianCount ? (medianSum / medianCount).toFixed(1) + ' ms' : '—';
+  document.getElementById('statPlayers').textContent = maxPlayers ? `${players}/${maxPlayers}` : players || '—';
+  document.getElementById('statLatency').textContent = latencyCount ? `${(latencySum / latencyCount).toFixed(1)} ms` : '—';
 }
 
 function renderAll() {
+  Object.values(charts).forEach(c => c.destroy());
+  charts = {};
   const grid = document.getElementById('grid');
   const empty = document.getElementById('emptyState');
-
-  if (targets.length === 0) {
+  if (!targets.length) {
     grid.innerHTML = '';
     empty.style.display = '';
     return;
   }
   empty.style.display = 'none';
-
-  // Destroy old charts
-  Object.values(charts).forEach(c => c.destroy());
-  charts = {};
-
   grid.innerHTML = '';
   targets.forEach(t => {
-    const arr = seriesCache[t.id] || [];
-    const last = arr.length ? arr[arr.length - 1] : null;
-    const isOnline = last && last.P50 != null && last.LossPct < 1;
-    const p50 = last && last.P50 != null ? last.P50.toFixed(1) + ' ms' : '—';
-    const lossAvg = arr.length ? (arr.reduce((s, d) => s + d.LossPct, 0) / arr.length * 100).toFixed(1) + '%' : '—';
-
+    const onlineSample = lastMetric(t.id, 'online');
+    const isOnline = onlineSample && onlineSample.Value === 1;
     const card = document.createElement('div');
     card.className = 'card server-card';
-    card.onclick = () => { window.location.href = `/detail.html?id=${encodeURIComponent(t.id)}`; };
+    card.onclick = () => { location.href = `/detail.html?id=${encodeURIComponent(t.id)}`; };
     card.innerHTML = `
-      <span class="click-hint">Click for details →</span>
       <div class="header">
         <span class="dot ${isOnline ? 'online' : 'offline'}"></span>
         <span class="name">${esc(t.name || t.id)}</span>
         <span class="host">${esc(t.host)}:${t.port}</span>
       </div>
-      <div class="mini-stats">
-        <span>Median: <span class="val ${isOnline ? 'green' : 'red'}">${p50}</span></span>
-        <span>Loss: <span class="val ${parseFloat(lossAvg) < 1 ? 'green' : 'red'}">${lossAvg}</span></span>
-        <span>Interval: <span class="val">${t.interval_sec}s</span></span>
+      <div class="metric-strip">
+        ${enabledMetrics(t).map(metric => metricTileHTML(t, metric)).join('')}
       </div>
-      <div class="chart-container"><canvas id="chart-${t.id}"></canvas></div>
     `;
     grid.appendChild(card);
-
-    renderMiniChart(t.id, arr);
+    enabledMetrics(t).forEach(metric => renderSpark(t.id, metric));
   });
 }
 
-function renderMiniChart(id, arr) {
-  const canvas = document.getElementById('chart-' + id);
+function metricTileHTML(t, metric) {
+  const last = lastMetric(t.id, metric);
+  return `
+    <div class="metric-tile">
+      <div class="metric-title"><span>${metrics[metric].label}</span><span>${monitorDefaults(t)[metric].interval_sec}s</span></div>
+      <div class="metric-value">${metricValue(metric, last)}</div>
+      <div class="metric-spark"><canvas id="spark-${t.id}-${metric}"></canvas></div>
+    </div>
+  `;
+}
+
+function metricValue(metric, sm) {
+  if (!sm) return '—';
+  if (metric === 'online') return sm.Value === 1 ? 'Online' : 'Offline';
+  if (metric === 'players') {
+    if (sm.Value == null) return '—';
+    const extra = parseExtra(sm);
+    return extra.max ? `${sm.Value}/${extra.max}` : String(sm.Value);
+  }
+  if (metric === 'latency') return sm.Value != null ? `${sm.Value.toFixed(1)} ms` : '—';
+  if (metric === 'loss') return sm.Value != null ? `${(sm.Value * 100).toFixed(1)}%` : '—';
+  return '—';
+}
+
+function renderSpark(targetID, metric) {
+  const canvas = document.getElementById(`spark-${targetID}-${metric}`);
   if (!canvas) return;
+  const arr = metricCache[`${targetID}:${metric}`] || [];
   const cc = chartColors();
-
-  const labels = arr.map(d => {
-    const dt = new Date(d.Ts * 1000);
-    return dt.getHours().toString().padStart(2,'0') + ':' + dt.getMinutes().toString().padStart(2,'0');
+  const data = arr.map(d => d.Value);
+  const color = metric === 'loss' || metric === 'online' ? cc.red : metric === 'players' ? cc.accent : cc.line;
+  charts[`${targetID}:${metric}`] = new Chart(canvas, {
+    type: metric === 'online' ? 'bar' : 'line',
+    data: { labels: arr.map(d => new Date(d.Ts * 1000).toLocaleTimeString()), datasets: [{ data, borderColor: color, backgroundColor: metric === 'online' ? color : 'transparent', borderWidth: 1.5, pointRadius: 0, tension: 0.3 }] },
+    options: { animation: false, responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { enabled: false } }, scales: { x: { display: false }, y: { display: false, min: metric === 'online' ? 0 : undefined, max: metric === 'online' ? 1 : undefined } } },
   });
-  const minD = arr.map(d => d.Min);
-  const p50  = arr.map(d => d.P50);
-  const maxD = arr.map(d => d.Max);
+}
 
-  charts[id] = new Chart(canvas, {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [
-        { data: maxD, borderColor: cc.bandBorder, backgroundColor: cc.band, fill: '+1', pointRadius: 0, borderWidth: 0.5 },
-        { data: minD, borderColor: cc.bandBorder, backgroundColor: 'transparent', fill: false, pointRadius: 0, borderWidth: 0.5 },
-        { data: p50, borderColor: cc.median, borderWidth: 1.5, backgroundColor: 'transparent', pointRadius: 0, tension: 0.3 },
-      ]
-    },
-    options: {
-      animation: false,
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      scales: {
-        x: { display: false },
-        y: { display: false, min: 0 },
-      },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: 'rgba(0,0,0,0.8)', titleFont: { size: 11 }, bodyFont: { size: 11 },
-          cornerRadius: 6, padding: 8,
-          callbacks: {
-            label: ctx => {
-              const names = ['max', 'min', 'median'];
-              return names[ctx.datasetIndex] + ': ' + (ctx.raw != null ? ctx.raw.toFixed(1) + ' ms' : '—');
-            }
-          }
-        },
-      },
-    },
-  });
+function lastMetric(targetID, metric) {
+  const arr = metricCache[`${targetID}:${metric}`] || [];
+  return arr.length ? arr[arr.length - 1] : null;
+}
+
+function parseExtra(sm) {
+  try { return sm && sm.Extra ? JSON.parse(sm.Extra) : {}; } catch { return {}; }
 }
 
 function esc(s) {
@@ -227,6 +216,5 @@ function esc(s) {
   setInterval(loadAll, 30000);
 })();
 </script>
-
 </body>
 </html>
