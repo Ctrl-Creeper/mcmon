@@ -7,6 +7,20 @@ server status history in SQLite, and shows the data in a bundled desktop UI.
 The app can also run as a small background service so monitoring continues
 after the window is closed.
 
+## Related Projects
+
+This desktop app is the standalone/local member of the MCMon project family.
+
+- `mc-latency-monitor`: this app. Use it when you want a local desktop monitor
+  that works without any server.
+- `mcmon-host`: Linux-only central dashboard and API for managed monitoring.
+  It configures nodes and generates one-line `mcmon-agent` install commands.
+- `mcmon-agent`: lightweight cross-platform node process with no UI. It reports
+  to `mcmon-host`.
+
+You do not need `mcmon-host` to use this desktop app. Configure a remote host
+only when you want the app to view or proxy data from a central deployment.
+
 ## Features
 
 - Native desktop app powered by Wails.
