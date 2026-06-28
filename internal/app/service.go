@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"fmt"
@@ -6,13 +6,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 const serviceLabel = "com.lewiswu.mcmon"
 
 // installService registers the current binary to run in the background and
 // start automatically at login/boot, using the platform's native mechanism.
-func installService() error {
+func installService(configPath string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -21,18 +22,22 @@ func installService() error {
 	if err != nil {
 		return err
 	}
-	wd, err := os.Getwd()
+	if configPath == "" {
+		configPath = "config.json"
+	}
+	configPath, err = filepath.Abs(configPath)
 	if err != nil {
 		return err
 	}
+	wd := filepath.Dir(configPath)
 
 	switch runtime.GOOS {
 	case "darwin":
-		return installLaunchd(exe, wd)
+		return installLaunchd(exe, wd, configPath)
 	case "linux":
-		return installSystemd(exe, wd)
+		return installSystemd(exe, wd, configPath)
 	case "windows":
-		return installWindowsTask(exe, wd)
+		return installWindowsTask(exe, configPath)
 	default:
 		return fmt.Errorf("background install not supported on %s", runtime.GOOS)
 	}
@@ -51,6 +56,41 @@ func uninstallService() error {
 	}
 }
 
+type BackgroundStatus struct {
+	Platform  string `json:"platform"`
+	Supported bool   `json:"supported"`
+	Enabled   bool   `json:"enabled"`
+	Detail    string `json:"detail"`
+}
+
+func backgroundStatus() BackgroundStatus {
+	status := BackgroundStatus{Platform: runtime.GOOS}
+	switch runtime.GOOS {
+	case "darwin":
+		status.Supported = true
+		path, err := launchdPlistPath()
+		status.Enabled = err == nil && fileExists(path)
+		status.Detail = path
+	case "linux":
+		status.Supported = true
+		path, err := systemdUnitPath()
+		status.Enabled = err == nil && fileExists(path)
+		status.Detail = path
+	case "windows":
+		status.Supported = true
+		status.Enabled = run("schtasks", "/Query", "/TN", windowsTaskName) == nil
+		status.Detail = windowsTaskName
+	default:
+		status.Detail = "background mode is not supported on this platform"
+	}
+	return status
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 // --- macOS: launchd user agent ---
 
 func launchdPlistPath() (string, error) {
@@ -61,28 +101,12 @@ func launchdPlistPath() (string, error) {
 	return filepath.Join(home, "Library", "LaunchAgents", serviceLabel+".plist"), nil
 }
 
-func installLaunchd(exe, wd string) error {
+func installLaunchd(exe, wd, configPath string) error {
 	path, err := launchdPlistPath()
 	if err != nil {
 		return err
 	}
-	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>%s</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>%s</string>
-  </array>
-  <key>WorkingDirectory</key><string>%s</string>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>%s/mcmon.log</string>
-  <key>StandardErrorPath</key><string>%s/mcmon.err.log</string>
-</dict>
-</plist>
-`, serviceLabel, exe, wd, wd, wd)
+	plist := launchdPlist(exe, wd, configPath)
 
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
@@ -98,6 +122,29 @@ func installLaunchd(exe, wd string) error {
 	}
 	fmt.Printf("Installed launchd agent at %s and started it.\n", path)
 	return nil
+}
+
+func launchdPlist(exe, wd, configPath string) string {
+	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>%s</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>%s</string>
+    <string>serve</string>
+    <string>-config</string>
+    <string>%s</string>
+  </array>
+  <key>WorkingDirectory</key><string>%s</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>%s/mcmon.log</string>
+  <key>StandardErrorPath</key><string>%s/mcmon.err.log</string>
+</dict>
+</plist>
+`, serviceLabel, exe, configPath, wd, wd, wd)
 }
 
 func uninstallLaunchd() error {
@@ -123,22 +170,12 @@ func systemdUnitPath() (string, error) {
 	return filepath.Join(home, ".config", "systemd", "user", "mcmon.service"), nil
 }
 
-func installSystemd(exe, wd string) error {
+func installSystemd(exe, wd, configPath string) error {
 	path, err := systemdUnitPath()
 	if err != nil {
 		return err
 	}
-	unit := fmt.Sprintf(`[Unit]
-Description=Minecraft latency monitor
-
-[Service]
-ExecStart=%s
-WorkingDirectory=%s
-Restart=on-failure
-
-[Install]
-WantedBy=default.target
-`, exe, wd)
+	unit := systemdUnit(exe, wd, configPath)
 
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
@@ -155,6 +192,20 @@ WantedBy=default.target
 	fmt.Printf("Installed systemd user unit at %s and started it.\n", path)
 	fmt.Println("If this is a headless server, run: loginctl enable-linger $USER")
 	return nil
+}
+
+func systemdUnit(exe, wd, configPath string) string {
+	return fmt.Sprintf(`[Unit]
+Description=Minecraft latency monitor
+
+[Service]
+ExecStart=%s serve -config %s
+WorkingDirectory=%s
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+`, systemdQuote(exe), systemdQuote(configPath), systemdQuote(wd))
 }
 
 func uninstallSystemd() error {
@@ -175,14 +226,8 @@ func uninstallSystemd() error {
 
 const windowsTaskName = "McLatencyMonitor"
 
-func installWindowsTask(exe, wd string) error {
-	// /SC ONLOGON keeps it running in the background after sign-in;
-	// /RL HIGHEST avoids extra UAC prompts when started this way.
-	args := []string{
-		"/Create", "/F", "/SC", "ONLOGON", "/RL", "HIGHEST",
-		"/TN", windowsTaskName,
-		"/TR", fmt.Sprintf(`"%s" -config "%s"`, exe, filepath.Join(wd, "config.json")),
-	}
+func installWindowsTask(exe, configPath string) error {
+	args := windowsTaskArgs(exe, configPath)
 	if err := run("schtasks", args...); err != nil {
 		return err
 	}
@@ -190,6 +235,24 @@ func installWindowsTask(exe, wd string) error {
 	_ = run("schtasks", "/Run", "/TN", windowsTaskName)
 	fmt.Printf("Installed scheduled task %q (runs at logon).\n", windowsTaskName)
 	return nil
+}
+
+func windowsTaskArgs(exe, configPath string) []string {
+	return []string{
+		"/Create", "/F", "/SC", "ONLOGON",
+		"/TN", windowsTaskName,
+		"/TR", windowsTaskCommand(exe, configPath),
+	}
+}
+
+func windowsTaskCommand(exe, configPath string) string {
+	return fmt.Sprintf(`"%s" serve -config "%s"`, exe, configPath)
+}
+
+func systemdQuote(s string) string {
+	escaped := strings.ReplaceAll(s, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	return `"` + escaped + `"`
 }
 
 func uninstallWindowsTask() error {

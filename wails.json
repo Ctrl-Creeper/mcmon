@@ -1,0 +1,22 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "mc-latency-monitor",
+  "outputfilename": "MC Latency Monitor",
+  "info": {
+    "productName": "MC Latency Monitor",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright 2026 Lewis Wu",
+    "comments": "Minecraft latency monitor"
+  },
+  "darwin": {
+    "bundleIdentifier": "com.lewiswu.mc-latency-monitor"
+  },
+  "frontend:dir": "internal/app/static",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev:watcher": "",
+  "frontend:dev:serverUrl": "",
+  "author": {
+    "name": "Lewis Wu"
+  }
+}

@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"encoding/json"
@@ -25,7 +25,7 @@ func newTestMux(t *testing.T, cfg Config) (*ConfigStore, *http.ServeMux) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	return cs, newMux(st, cs, NewManager(st))
+	return cs, newMux(st, cs, NewManager(st), cfgPath)
 }
 
 func TestDefaultConfigBindsLocalhostForDesktopSafety(t *testing.T) {

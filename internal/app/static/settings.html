@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Settings - MC Latency Monitor</title>
+<link rel="stylesheet" href="/style.css" />
+<style>
+  .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px 0; border-top: 1px solid var(--border-light); }
+  .setting-row:first-child { border-top: 0; padding-top: 0; }
+  .setting-title { font-weight: 650; font-size: 14px; }
+  .setting-desc { color: var(--text-faint); font-size: 12px; margin-top: 4px; max-width: 620px; }
+  .switch { position: relative; width: 48px; height: 28px; flex: 0 0 auto; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider { position: absolute; cursor: pointer; inset: 0; background: var(--border); border-radius: 999px; transition: background var(--motion-med) var(--ease-smooth), box-shadow var(--motion-med) var(--ease-smooth); }
+  .slider::before { position: absolute; content: ""; height: 22px; width: 22px; left: 3px; top: 3px; background: white; border-radius: 50%; box-shadow: var(--shadow-sm); transition: transform var(--motion-med) var(--ease-spring); }
+  .switch input:checked + .slider { background: var(--accent); box-shadow: 0 0 0 4px oklch(0.55 0.18 280 / 12%); }
+  .switch input:checked + .slider::before { transform: translateX(20px); }
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="logo">⚡ MCMon</span>
+  <a href="/">Dashboard</a>
+  <a href="/servers.html">Servers</a>
+  <a href="/remote.html">Remote</a>
+  <a href="/settings.html" class="active">Settings</a>
+  <span class="spacer"></span>
+  <button class="theme-toggle" id="themeBtn" title="Toggle theme">🌙</button>
+</nav>
+
+<div class="wrap">
+  <div class="card">
+    <div class="card-header"><h2>App Settings</h2></div>
+    <div class="setting-row">
+      <div>
+        <div class="setting-title">Run in background</div>
+        <div class="setting-desc">Keep the lightweight monitor process running after the window is closed, using the native background service for this platform.</div>
+        <div class="muted" id="backgroundDetail" style="margin-top:8px;">Checking status...</div>
+      </div>
+      <label class="switch" title="Run in background">
+        <input type="checkbox" id="backgroundToggle" />
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="err" id="settingsErr"></div>
+    <div class="ok" id="settingsOk"></div>
+  </div>
+</div>
+
+<script>
+const themeBtn = document.getElementById('themeBtn');
+function applyTheme(dark) {
+  document.body.classList.toggle('dark', dark);
+  themeBtn.textContent = dark ? '☀️' : '🌙';
+  localStorage.setItem('mcmon-theme', dark ? 'dark' : 'light');
+}
+themeBtn.onclick = () => applyTheme(!document.body.classList.contains('dark'));
+applyTheme(localStorage.getItem('mcmon-theme') === 'dark' || (!localStorage.getItem('mcmon-theme') && matchMedia('(prefers-color-scheme:dark)').matches));
+
+const backgroundToggle = document.getElementById('backgroundToggle');
+const backgroundDetail = document.getElementById('backgroundDetail');
+const settingsErr = document.getElementById('settingsErr');
+const settingsOk = document.getElementById('settingsOk');
+
+async function loadBackgroundStatus() {
+  settingsErr.textContent = '';
+  const status = await fetch('/api/settings/background').then(r => r.json());
+  backgroundToggle.checked = !!status.enabled;
+  backgroundToggle.disabled = !status.supported;
+  backgroundDetail.textContent = status.supported
+    ? `${status.platform}: ${status.enabled ? 'enabled' : 'disabled'} · ${status.detail || ''}`
+    : `${status.platform}: ${status.detail}`;
+}
+
+backgroundToggle.onchange = async () => {
+  settingsErr.textContent = '';
+  settingsOk.textContent = '';
+  backgroundToggle.disabled = true;
+  const res = await fetch('/api/settings/background', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ enabled: backgroundToggle.checked }),
+  });
+  if (!res.ok) {
+    settingsErr.textContent = await res.text();
+  } else {
+    settingsOk.textContent = backgroundToggle.checked ? 'Background monitoring enabled.' : 'Background monitoring disabled.';
+  }
+  await loadBackgroundStatus();
+};
+
+loadBackgroundStatus().catch(e => { settingsErr.textContent = e.message; });
+</script>
+
+</body>
+</html>

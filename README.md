@@ -1,50 +1,121 @@
-# mc-latency-monitor
+# MC Latency Monitor
 
-A Minecraft Java Edition server latency monitor. Pings target servers using
-the vanilla status/ping protocol, stores min/median/max latency and packet
-loss per probe burst in SQLite, and serves a small built-in web UI with
-graphs. Servers, their ping period, and probe settings are fully editable at
-runtime from the UI — no config file editing required.
+MC Latency Monitor is a lightweight desktop monitor for Minecraft Java Edition
+servers. It probes servers with the vanilla status/ping protocol, stores
+latency and loss history in SQLite, and shows the data in a bundled desktop UI.
 
-This is a rewrite of an earlier PHP + RRDtool prototype, in Go, as a single
-self-contained binary with no external dependencies (no PHP, no rrdtool,
-pure-Go SQLite driver). The binary cross-compiles for macOS, Windows, and
-Linux, and the UI is just a browser tab, so "the app" runs anywhere Go can
-target.
+The app can also run as a small background service so monitoring continues
+after the window is closed.
 
-## Run
+## Features
+
+- Native desktop app powered by Wails.
+- Minecraft Java Edition status/ping probing.
+- Per-server probe interval, timeout, burst size, and probe gap.
+- SQLite history storage.
+- Latency charts with min, median, max, and packet loss.
+- Local-only default bind address: `127.0.0.1:8090`.
+- Optional remote host integration for pairing with `mcmon-host`.
+- Background mode:
+  - macOS: user `launchd` agent.
+  - Linux: user `systemd` service.
+  - Windows: Scheduled Task at logon.
+
+## Requirements
+
+For development and local builds:
+
+- Go 1.25.4 or newer compatible Go toolchain.
+- Node.js/npm, required by Wails even though this project has no frontend build
+  step.
+- Wails v2.10.2, invoked through `go run` by the build scripts.
+
+Platform-specific desktop build requirements:
+
+- macOS: Xcode Command Line Tools.
+- Windows: WebView2 runtime. The Windows build script uses Wails'
+  `-webview2 download` option.
+- Linux: GTK/WebKitGTK development packages. On Ubuntu:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev pkg-config
+```
+
+## Run From Source
+
+Desktop app:
+
+```sh
+go run .
+```
+
+CLI/server mode:
 
 ```sh
 go run ./cmd/mcmon
 ```
 
-On first run it creates `config.json` next to the binary with a placeholder
-target. Then open http://localhost:8090 and use the **Servers** panel to add,
-edit, or delete monitored servers — each one has its own ping period
-("interval_sec"), probe burst size, timeout, and inter-probe gap. Changes are
-applied immediately (the prober for that target restarts) and persisted back
-to `config.json`.
+The CLI server listens on `127.0.0.1:8090` by default. Open:
 
-## Run in the background
-
-To keep the monitor running across reboots/logins without a terminal open:
-
-```sh
-go run ./cmd/mcmon install     # registers + starts a background service
-go run ./cmd/mcmon uninstall   # stops + removes it
+```text
+http://127.0.0.1:8090
 ```
 
-This uses the platform's native mechanism, working from the directory the
-binary is in (so `config.json`/`mcmon.db` live there):
+## Build The Desktop App
 
-- **macOS** — a `launchd` user agent (`~/Library/LaunchAgents/com.lewiswu.mcmon.plist`), `RunAtLoad` + `KeepAlive`.
-- **Linux** — a `systemd --user` unit (`~/.config/systemd/user/mcmon.service`). On a headless box, also run `loginctl enable-linger $USER` so it starts without an active login session.
-- **Windows** — a Scheduled Task (`schtasks`) that runs at logon.
+### macOS and Linux
 
-Run `install`/`uninstall` using the actual built binary (not `go run`, which
-would register the temporary build wrapper) once you've built one — see below.
+```sh
+./scripts/build-desktop.sh
+```
 
-## Build for other platforms
+On macOS, the script also performs local ad-hoc signing so the generated app can
+be opened on your own machine:
+
+```text
+build/bin/mc-latency-monitor.app
+```
+
+### Windows
+
+Run in PowerShell:
+
+```powershell
+.\scripts\build-desktop.ps1
+```
+
+The output is written under:
+
+```text
+build/bin/
+```
+
+### Build Options
+
+Both scripts pass extra arguments through to `wails build`.
+
+Examples:
+
+```sh
+./scripts/build-desktop.sh -debug
+./scripts/build-desktop.sh -platform darwin/arm64
+```
+
+```powershell
+.\scripts\build-desktop.ps1 -debug
+```
+
+## Build The CLI Binary
+
+The CLI binary is useful for server-only deployments or manual background
+service installation.
+
+```sh
+go build -o dist/mcmon ./cmd/mcmon
+```
+
+Cross-compile examples:
 
 ```sh
 GOOS=windows GOARCH=amd64 go build -o dist/mcmon.exe ./cmd/mcmon
@@ -52,23 +123,95 @@ GOOS=linux   GOARCH=amd64 go build -o dist/mcmon-linux ./cmd/mcmon
 GOOS=darwin  GOARCH=arm64 go build -o dist/mcmon-mac ./cmd/mcmon
 ```
 
+## Background Mode
+
+In the desktop app, open Settings and enable "Run in background".
+
+From the CLI:
+
+```sh
+mcmon install -config /path/to/config.json
+mcmon uninstall
+```
+
+The installed background service starts the same binary in lightweight mode:
+
+```sh
+serve -config /path/to/config.json
+```
+
+That means the GUI is not started by the background service.
+
+Platform details:
+
+- macOS: `~/Library/LaunchAgents/com.lewiswu.mcmon.plist`
+- Linux: `~/.config/systemd/user/mcmon.service`
+- Windows: Scheduled Task named `McLatencyMonitor`
+
+On headless Linux systems, enable user services after logout:
+
+```sh
+loginctl enable-linger "$USER"
+```
+
+## Remote Host Integration
+
+The desktop app can be used standalone. It can also connect to an `mcmon-host`
+instance from the Remote view.
+
+Remote settings support:
+
+- Host URL.
+- Optional admin token.
+- Bearer token forwarding to the host API.
+
+If no remote host is configured, local monitoring continues to work normally.
+
 ## API
 
-- `GET /api/targets` — list configured servers
-- `POST /api/targets` — add a server (JSON body: id, name, host, port, interval_sec, probes_per_burst, timeout_ms, probe_gap_ms, protocol_version)
-- `PUT /api/targets/{id}` — edit a server (same body; restarts its probe loop)
-- `DELETE /api/targets/{id}` — remove a server (stops probing; history stays in `mcmon.db`)
-- `GET /api/series?target={id}&range={1h|6h|12h|1d|7d|30d}` — latency/loss series for graphing
+The local server exposes:
 
-## Status
+- `GET /api/targets`
+- `POST /api/targets`
+- `PUT /api/targets/{id}`
+- `DELETE /api/targets/{id}`
+- `GET /api/series?target={id}&range={1h|6h|12h|1d|7d|30d}`
+- `GET /api/settings/background`
+- `POST /api/settings/background`
+- `GET /api/remote/config`
+- `POST /api/remote/config`
+- `GET /api/remote/*`
 
-Draft / proof of concept:
+## Development Checks
 
-- [x] MC status+ping protocol round trip
-- [x] Configurable per-server ping period + burst sampling (min/median/max/loss)
-- [x] SQLite storage
-- [x] Web UI: add/edit/delete servers, Chart.js graphs (min/max band, median, loss %)
-- [x] Background running via launchd / systemd / Scheduled Task
-- [ ] Native desktop wrapper (currently a server + browser UI)
-- [ ] Mobile app
-- [ ] Alerting / thresholds
+Run tests:
+
+```sh
+go test ./...
+```
+
+Check Wails environment:
+
+```sh
+go run github.com/wailsapp/wails/v2/cmd/wails@v2.10.2 doctor
+```
+
+Cross-platform compile checks from macOS:
+
+```sh
+GOOS=linux GOARCH=amd64 go test -exec /usr/bin/true ./...
+GOOS=windows GOARCH=amd64 go test -exec /usr/bin/true ./...
+```
+
+Full desktop packaging should be done on the native target platform. Wails does
+not currently support Linux desktop packaging from macOS.
+
+## CI
+
+The GitHub Actions workflow in `.github/workflows/desktop.yml` builds on native
+platform runners:
+
+- macOS app bundle.
+- Windows desktop app.
+- Linux desktop binary.
+- Go tests on Ubuntu.

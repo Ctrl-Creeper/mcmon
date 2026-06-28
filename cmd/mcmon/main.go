@@ -8,25 +8,32 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
-	"net/http"
 	"os"
 
-	"github.com/lewiswu/mc-latency-monitor/internal/store"
+	"github.com/lewiswu/mc-latency-monitor/internal/app"
 )
 
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "install":
-			if err := installService(); err != nil {
+			configPath := commandConfigPath("mcmon install", os.Args[2:])
+			if err := app.InstallBackground(configPath); err != nil {
 				log.Fatalf("install: %v", err)
 			}
 			return
 		case "uninstall":
-			if err := uninstallService(); err != nil {
+			if err := app.UninstallBackground(); err != nil {
 				log.Fatalf("uninstall: %v", err)
+			}
+			return
+		case "serve":
+			configPath := commandConfigPath("mcmon serve", os.Args[2:])
+			if err := app.RunServer(context.Background(), configPath); err != nil {
+				log.Fatal(err)
 			}
 			return
 		}
@@ -36,24 +43,14 @@ func main() {
 	configPath := fs.String("config", "config.json", "path to config file (created with defaults if missing)")
 	fs.Parse(os.Args[1:])
 
-	cs, err := openConfigStore(*configPath)
-	if err != nil {
-		log.Fatalf("load config: %v", err)
-	}
-
-	st, err := store.Open(cs.Snapshot().DBPath)
-	if err != nil {
-		log.Fatalf("open store: %v", err)
-	}
-	defer st.Close()
-
-	mgr := NewManager(st)
-	mgr.Sync(cs.Targets())
-
-	mux := newMux(st, cs, mgr)
-	addr := cs.Snapshot().ListenAddr
-	log.Printf("mcmon listening on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := app.RunServer(context.Background(), *configPath); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func commandConfigPath(name string, args []string) string {
+	fs := flag.NewFlagSet(name, flag.ExitOnError)
+	configPath := fs.String("config", "config.json", "path to config file")
+	fs.Parse(args)
+	return *configPath
 }

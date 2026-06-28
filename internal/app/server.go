@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"embed"
@@ -23,7 +23,7 @@ var rangeToSeconds = map[string]int64{
 	"1d": 24 * 3600, "7d": 7 * 24 * 3600, "30d": 30 * 24 * 3600,
 }
 
-func newMux(st *store.Store, cs *ConfigStore, mgr *Manager) *http.ServeMux {
+func newMux(st *store.Store, cs *ConfigStore, mgr *Manager, configPath string) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	sub, err := fs.Sub(staticFS, "static")
@@ -129,6 +129,34 @@ func newMux(st *store.Store, cs *ConfigStore, mgr *Manager) *http.ServeMux {
 			return
 		}
 		writeJSON(w, series)
+	})
+
+	mux.HandleFunc("/api/settings/background", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(w, Background())
+		case http.MethodPost:
+			var body struct {
+				Enabled bool `json:"enabled"`
+			}
+			if !decodeJSON(w, r, &body) {
+				return
+			}
+			if body.Enabled {
+				if err := InstallBackground(configPath); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			} else {
+				if err := UninstallBackground(); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			}
+			writeJSON(w, Background())
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
 	})
 
 	// --- Remote host proxy ---
