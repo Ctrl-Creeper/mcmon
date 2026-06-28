@@ -35,12 +35,23 @@ Platform-specific desktop build requirements:
 - macOS: Xcode Command Line Tools.
 - Windows: WebView2 runtime. The Windows build script uses Wails'
   `-webview2 download` option.
-- Linux: GTK/WebKitGTK development packages. On Ubuntu:
+- Linux: GTK/WebKitGTK development packages. On Ubuntu 24.04 or newer:
 
 ```sh
 sudo apt-get update
 sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev pkg-config
 ```
+
+On Ubuntu 22.04 or older Debian-based systems, use the WebKitGTK 4.0 package
+instead:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev pkg-config
+```
+
+The build script detects the installed WebKitGTK pkg-config package and passes
+the matching Wails build tag automatically.
 
 ## Run From Source
 
