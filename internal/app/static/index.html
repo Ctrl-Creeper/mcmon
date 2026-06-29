@@ -68,6 +68,7 @@ applyTheme(localStorage.getItem('mcmon-theme') === 'dark' || (!localStorage.getI
 function chartColors() {
   const dark = document.body.classList.contains('dark');
   return {
+    green: dark ? '#8be98b' : '#00a040',
     line: dark ? '#8be98b' : '#00a040',
     red: dark ? '#ff7777' : '#d92828',
     accent: dark ? '#b8a6ff' : '#6b4ee6',
@@ -190,7 +191,7 @@ function renderSpark(targetID, metric) {
   const arr = metricCache[`${targetID}:${metric}`] || [];
   const cc = chartColors();
   const data = arr.map(d => d.Value);
-  const color = metric === 'loss' || metric === 'online' ? cc.red : metric === 'players' ? cc.accent : cc.line;
+  const color = metric === 'online' ? cc.green : metric === 'loss' ? cc.red : metric === 'players' ? cc.accent : cc.line;
   charts[`${targetID}:${metric}`] = new Chart(canvas, {
     type: metric === 'online' ? 'bar' : 'line',
     data: { labels: arr.map(d => new Date(d.Ts * 1000).toLocaleTimeString()), datasets: [{ data, borderColor: color, backgroundColor: metric === 'online' ? color : 'transparent', borderWidth: 1.5, pointRadius: 0, tension: 0.3 }] },

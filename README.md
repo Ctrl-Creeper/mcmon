@@ -169,7 +169,7 @@ That means the GUI is not started by the background service.
 
 Platform details:
 
-- macOS: `~/Library/LaunchAgents/com.lewiswu.mcmon.plist`
+- macOS: `~/Library/LaunchAgents/com.mcmon.plist`
 - Linux: `~/.config/systemd/user/mcmon.service`
 - Windows: Scheduled Task named `McLatencyMonitor`
 

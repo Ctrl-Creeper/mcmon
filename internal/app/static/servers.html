@@ -119,6 +119,7 @@ applyTheme(localStorage.getItem('mcmon-theme') === 'dark' || (!localStorage.getI
 
 // ===== State =====
 let targetsCache = [];
+let onlineCache = {};
 let selected = new Set();
 let importData = [];
 let importSelected = new Set();
@@ -131,6 +132,13 @@ function esc(s) {
 async function loadTargets() {
   targetsCache = await fetch('/api/targets').then(r => r.json()) || [];
   if (!Array.isArray(targetsCache)) targetsCache = [];
+  onlineCache = {};
+  await Promise.all(targetsCache.map(async t => {
+    if (!monitorDefaults(t).online.enabled) return;
+    const data = await fetch(`/api/metrics?target=${encodeURIComponent(t.id)}&metric=online&range=1h`).then(r => r.json());
+    const arr = Array.isArray(data) ? data : [];
+    onlineCache[t.id] = arr.length ? arr[arr.length - 1] : null;
+  }));
   selected = new Set(Array.from(selected).filter(id => targetsCache.some(t => t.id === id)));
   renderTable();
 }
@@ -142,7 +150,7 @@ function renderTable() {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td><input type="checkbox" class="sel" data-id="${t.id}" ${selected.has(t.id)?'checked':''}></td>
-      <td><span class="dot online"></span></td>
+      <td><span class="dot ${statusClass(t)}"></span></td>
       <td><strong>${esc(t.name || t.id)}</strong></td>
       <td>${esc(t.host)}:${t.port}</td>
       <td>${enabledMonitorLabels(t).join(', ') || 'None'}</td>
@@ -161,6 +169,13 @@ function renderTable() {
   tbody.querySelectorAll('[data-del]').forEach(b => b.onclick = () => deleteTarget(b.dataset.del));
   document.getElementById('selectAll').checked = targetsCache.length > 0 && selected.size === targetsCache.length;
   updateSelectInfo();
+}
+
+function statusClass(t) {
+  if (!monitorDefaults(t).online.enabled) return 'unknown';
+  const last = onlineCache[t.id];
+  if (!last) return 'unknown';
+  return last.Value === 1 ? 'online' : 'offline';
 }
 
 function monitorDefaults(t) {

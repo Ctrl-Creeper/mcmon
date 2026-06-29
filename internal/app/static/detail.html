@@ -74,7 +74,7 @@
 
 <script>
 const metricDefs = {
-  online: { label: 'Online', color: 'red' },
+  online: { label: 'Online', color: 'green' },
   players: { label: 'Players', color: 'accent' },
   latency: { label: 'Latency', color: 'green' },
   loss: { label: 'Loss', color: 'red' },
@@ -199,7 +199,11 @@ async function renderMetricView() {
   document.getElementById('backLink').href = `/detail.html?id=${encodeURIComponent(targetId)}`;
   document.getElementById('backLink').textContent = '← Back to Server Overview';
   renderRangeButtons();
-  const arr = await loadMetric(currentMetric, currentRange);
+  const loads = [loadMetric(currentMetric, currentRange)];
+  if (currentMetric !== 'online' && monitorDefaults(targetInfo).online.enabled) {
+    loads.push(loadMetric('online', currentRange));
+  }
+  const [arr] = await Promise.all(loads);
   updateStatusDot();
   const last = arr.length ? arr[arr.length - 1] : null;
   document.getElementById('metricLabel').textContent = metricDefs[currentMetric].label;
@@ -251,9 +255,13 @@ function renderMainChart(arr) {
 document.getElementById('resetZoom').onclick = () => { if (chart) chart.resetZoom(); };
 
 function updateStatusDot() {
+  if (!monitorDefaults(targetInfo || {}).online.enabled) {
+    document.getElementById('statusDot').className = 'dot unknown';
+    return;
+  }
   const online = metricCache['online:1h'] || metricCache[`online:${currentRange}`] || [];
   const last = online.length ? online[online.length - 1] : null;
-  document.getElementById('statusDot').className = 'dot ' + (last && last.Value === 1 ? 'online' : 'offline');
+  document.getElementById('statusDot').className = 'dot ' + (!last ? 'unknown' : last.Value === 1 ? 'online' : 'offline');
 }
 
 function metricValue(metric, sm) {

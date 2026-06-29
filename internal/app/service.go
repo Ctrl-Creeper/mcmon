@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const serviceLabel = "com.lewiswu.mcmon"
+const serviceLabel = "com.mcmon"
 
 // installService registers the current binary to run in the background and
 // start automatically at login/boot, using the platform's native mechanism.

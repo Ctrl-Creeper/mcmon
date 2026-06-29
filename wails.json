@@ -9,7 +9,7 @@
     "comments": "Minecraft server monitor"
   },
   "darwin": {
-    "bundleIdentifier": "com.lewiswu.mc-latency-monitor"
+    "bundleIdentifier": "com.mcmon.app"
   },
   "frontend:dir": "internal/app/static",
   "frontend:install": "",
