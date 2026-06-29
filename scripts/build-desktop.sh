@@ -45,7 +45,11 @@ EOF
   fi
 fi
 
-go run github.com/wailsapp/wails/v2/cmd/wails@v2.10.2 build -clean "${ARGS[@]}"
+if (( ${#ARGS[@]} > 0 )); then
+  go run github.com/wailsapp/wails/v2/cmd/wails@v2.10.2 build -clean "${ARGS[@]}"
+else
+  go run github.com/wailsapp/wails/v2/cmd/wails@v2.10.2 build -clean
+fi
 
 if [[ "$(uname -s)" == "Darwin" ]]; then
   APP="$ROOT/build/bin/mc-latency-monitor.app"
