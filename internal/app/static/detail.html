@@ -188,8 +188,34 @@ function renderSmallChart(metric) {
   charts[metric] = new Chart(document.getElementById(`small-${metric}`), {
     type: metric === 'online' ? 'bar' : 'line',
     data: { labels: arr.map(x => new Date(x.Ts * 1000).toLocaleTimeString()), datasets: [{ data: arr.map(x => x.Value), borderColor: cc[def.color], backgroundColor: metric === 'online' ? cc[def.color] : 'transparent', borderWidth: 1.5, pointRadius: 0, tension: 0.3 }] },
-    options: { animation: false, responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { enabled: false } }, scales: { x: { display: false }, y: { display: false, min: metric === 'online' ? 0 : undefined, max: metric === 'online' ? 1 : undefined } } },
+    options: { animation: false, responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { enabled: false } }, scales: thumbnailScales(metric, cc) },
   });
+}
+
+function thumbnailScales(metric, cc) {
+  return {
+    x: {
+      display: true,
+      grid: { display: false },
+      ticks: { color: cc.tick, maxTicksLimit: 3, maxRotation: 0, autoSkip: true, font: { size: 10 } },
+    },
+    y: {
+      display: true,
+      min: metric === 'online' ? 0 : 0,
+      max: metric === 'online' ? 1 : undefined,
+      grid: { color: cc.grid, drawTicks: false },
+      border: { display: false },
+      ticks: { color: cc.tick, maxTicksLimit: 3, font: { size: 10 }, callback: value => formatTick(metric, value) },
+    },
+  };
+}
+
+function formatTick(metric, value) {
+  const n = Number(value);
+  if (metric === 'online') return n === 1 ? '1' : n === 0 ? '0' : '';
+  if (metric === 'latency') return `${Math.round(n)}ms`;
+  if (metric === 'loss') return `${Math.round(n * 100)}%`;
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
 }
 
 async function renderMetricView() {

@@ -13,7 +13,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/lewiswu/mc-latency-monitor/internal/app"
+	"github.com/YOUR_PATH/mc-latency-monitor/internal/app"
 )
 
 func main() {

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lewiswu/mc-latency-monitor/internal/store"
+	"github.com/YOUR_PATH/mc-latency-monitor/internal/store"
 )
 
 //go:embed static

@@ -1,4 +1,4 @@
-module github.com/lewiswu/mc-latency-monitor
+module github.com/YOUR_PATH/mc-latency-monitor
 
 go 1.25.4
 

@@ -5,7 +5,7 @@
   "info": {
     "productName": "MC Server Monitor",
     "productVersion": "1.0.0",
-    "copyright": "Copyright 2026 Lewis Wu",
+    "copyright": "Copyright 2026 MCMon Contributors",
     "comments": "Minecraft server monitor"
   },
   "darwin": {
@@ -17,6 +17,6 @@
   "frontend:dev:watcher": "",
   "frontend:dev:serverUrl": "",
   "author": {
-    "name": "Lewis Wu"
+    "name": "MCMon Contributors"
   }
 }

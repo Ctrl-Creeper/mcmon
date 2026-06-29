@@ -17,7 +17,7 @@
   .metric-tile { border: 1px solid var(--border-light); border-radius: var(--radius); padding: 10px; background: var(--bg-input); min-height: 104px; }
   .metric-title { display: flex; justify-content: space-between; gap: 8px; color: var(--text-faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; }
   .metric-value { font-size: 20px; font-weight: 700; margin: 4px 0 6px; }
-  .metric-spark { height: 46px; }
+  .metric-spark { height: 72px; }
   .empty-state { text-align: center; padding: 60px 20px; color: var(--text-faint); }
   .empty-state a { color: var(--accent); }
   @media (max-width: 560px) { .server-grid, .metric-strip { grid-template-columns: 1fr; } }
@@ -73,6 +73,7 @@ function chartColors() {
     red: dark ? '#ff7777' : '#d92828',
     accent: dark ? '#b8a6ff' : '#6b4ee6',
     grid: dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
+    tick: dark ? 'rgba(255,255,255,0.42)' : 'rgba(0,0,0,0.42)',
   };
 }
 
@@ -195,8 +196,34 @@ function renderSpark(targetID, metric) {
   charts[`${targetID}:${metric}`] = new Chart(canvas, {
     type: metric === 'online' ? 'bar' : 'line',
     data: { labels: arr.map(d => new Date(d.Ts * 1000).toLocaleTimeString()), datasets: [{ data, borderColor: color, backgroundColor: metric === 'online' ? color : 'transparent', borderWidth: 1.5, pointRadius: 0, tension: 0.3 }] },
-    options: { animation: false, responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { enabled: false } }, scales: { x: { display: false }, y: { display: false, min: metric === 'online' ? 0 : undefined, max: metric === 'online' ? 1 : undefined } } },
+    options: { animation: false, responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { enabled: false } }, scales: thumbnailScales(metric, cc) },
   });
+}
+
+function thumbnailScales(metric, cc) {
+  return {
+    x: {
+      display: true,
+      grid: { display: false },
+      ticks: { color: cc.tick, maxTicksLimit: 3, maxRotation: 0, autoSkip: true, font: { size: 10 } },
+    },
+    y: {
+      display: true,
+      min: metric === 'online' ? 0 : 0,
+      max: metric === 'online' ? 1 : undefined,
+      grid: { color: cc.grid, drawTicks: false },
+      border: { display: false },
+      ticks: { color: cc.tick, maxTicksLimit: 3, font: { size: 10 }, callback: value => formatTick(metric, value) },
+    },
+  };
+}
+
+function formatTick(metric, value) {
+  const n = Number(value);
+  if (metric === 'online') return n === 1 ? '1' : n === 0 ? '0' : '';
+  if (metric === 'latency') return `${Math.round(n)}ms`;
+  if (metric === 'loss') return `${Math.round(n * 100)}%`;
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
 }
 
 function lastMetric(targetID, metric) {

@@ -35,15 +35,15 @@ func TestSystemdUnitRunsLightweightServeModeWithQuotedPaths(t *testing.T) {
 }
 
 func TestWindowsTaskCommandRunsLightweightServeMode(t *testing.T) {
-	got := windowsTaskCommand(`C:\Program Files\MC Latency Monitor\mcmon.exe`, `C:\Users\Lewis\AppData\Roaming\mc-latency-monitor\config.json`)
-	want := `"C:\Program Files\MC Latency Monitor\mcmon.exe" serve -config "C:\Users\Lewis\AppData\Roaming\mc-latency-monitor\config.json"`
+	got := windowsTaskCommand(`C:\Program Files\MC Latency Monitor\mcmon.exe`, `C:\Users\YOUR_PATH_NAME\AppData\Roaming\mc-latency-monitor\config.json`)
+	want := `"C:\Program Files\MC Latency Monitor\mcmon.exe" serve -config "C:\Users\YOUR_PATH_NAME\AppData\Roaming\mc-latency-monitor\config.json"`
 	if got != want {
 		t.Fatalf("windows task command = %q, want %q", got, want)
 	}
 }
 
 func TestWindowsTaskArgsDoNotRequireAdministrator(t *testing.T) {
-	args := windowsTaskArgs(`C:\Apps\mcmon.exe`, `C:\Users\Lewis\AppData\Roaming\mc-latency-monitor\config.json`)
+	args := windowsTaskArgs(`C:\Apps\mcmon.exe`, `C:\Users\YOUR_PATH_NAME\AppData\Roaming\mc-latency-monitor\config.json`)
 	for _, arg := range args {
 		if arg == "/RL" || arg == "HIGHEST" {
 			t.Fatalf("scheduled task args should not request highest privileges: %#v", args)
