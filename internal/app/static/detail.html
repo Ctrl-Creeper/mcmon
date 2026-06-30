@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Server Detail - MC Server Monitor</title>
+<title>Server Detail - mcmon</title>
 <link rel="stylesheet" href="/style.css" />
 <script src="/vendor/chart.umd.js"></script>
 <script src="/vendor/chartjs-plugin-zoom.min.js"></script>
@@ -117,7 +117,7 @@ async function loadTarget() {
     document.getElementById('serverName').textContent = 'Server not found';
     return;
   }
-  document.title = `${targetInfo.name || targetInfo.id} - MC Server Monitor`;
+  document.title = `${targetInfo.name || targetInfo.id} - mcmon`;
   document.getElementById('serverName').textContent = targetInfo.name || targetInfo.id;
   document.getElementById('serverHost').textContent = `${targetInfo.host}:${targetInfo.port}`;
   document.getElementById('serverConfig').textContent = `Timeout: ${targetInfo.timeout_ms}ms`;

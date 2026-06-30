@@ -1,6 +1,6 @@
-# MC Server Monitor
+# mcmon
 
-MC Server Monitor is a lightweight desktop monitor for Minecraft Java Edition
+mcmon is a lightweight desktop monitor for Minecraft Java Edition
 servers. It probes servers with the vanilla status/ping protocol, stores
 server status history in SQLite, and shows the data in a bundled desktop UI.
 
@@ -9,9 +9,9 @@ after the window is closed.
 
 ## Related Projects
 
-This desktop app is the standalone/local member of the MCMon project family.
+This desktop app is the standalone/local member of the mcmon project family.
 
-- `mc-latency-monitor`: this app. Use it when you want a local desktop monitor
+- `mcmon`: this app. Use it when you want a local desktop monitor
   that works without any server.
 - [mcmon-host](https://github.com/Ctrl-Creeper/mcmon-host): Linux-only central dashboard and API for managed monitoring.
   It configures nodes and generates one-line `mcmon-agent` install commands.
@@ -99,7 +99,7 @@ On macOS, the script also performs local ad-hoc signing so the generated app can
 be opened on your own machine:
 
 ```text
-build/bin/mc-latency-monitor.app
+build/bin/mcmon.app
 ```
 
 ### Windows
@@ -171,7 +171,7 @@ Platform details:
 
 - macOS: `~/Library/LaunchAgents/com.mcmon.plist`
 - Linux: `~/.config/systemd/user/mcmon.service`
-- Windows: Scheduled Task named `McLatencyMonitor`
+- Windows: Scheduled Task named `mcmon`
 
 On headless Linux systems, enable user services after logout:
 

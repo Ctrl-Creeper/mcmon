@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/YOUR_PATH/mc-latency-monitor/internal/store"
+	"github.com/Ctrl-Creeper/mcmon/internal/store"
 )
 
 func newTestMux(t *testing.T, cfg Config) (*ConfigStore, *http.ServeMux) {

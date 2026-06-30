@@ -1,15 +1,15 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
-  "name": "mc-latency-monitor",
-  "outputfilename": "MC Server Monitor",
+  "name": "mcmon",
+  "outputfilename": "mcmon",
   "info": {
-    "productName": "MC Server Monitor",
+    "productName": "mcmon",
     "productVersion": "1.0.0",
     "copyright": "Copyright 2026 MCMon Contributors",
     "comments": "Minecraft server monitor"
   },
   "darwin": {
-    "bundleIdentifier": "com.mcmon.app"
+    "bundleIdentifier": "com.mcmon"
   },
   "frontend:dir": "internal/app/static",
   "frontend:install": "",

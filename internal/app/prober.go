@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/YOUR_PATH/mc-latency-monitor/internal/mcping"
-	"github.com/YOUR_PATH/mc-latency-monitor/internal/store"
+	"github.com/Ctrl-Creeper/mcmon/internal/mcping"
+	"github.com/Ctrl-Creeper/mcmon/internal/store"
 )
 
 const (

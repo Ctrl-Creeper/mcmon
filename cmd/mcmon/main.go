@@ -13,7 +13,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/YOUR_PATH/mc-latency-monitor/internal/app"
+	"github.com/Ctrl-Creeper/mcmon/internal/app"
 )
 
 func main() {

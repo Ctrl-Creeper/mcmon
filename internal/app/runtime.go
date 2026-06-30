@@ -6,7 +6,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/YOUR_PATH/mc-latency-monitor/internal/store"
+	"github.com/Ctrl-Creeper/mcmon/internal/store"
 )
 
 type Runtime struct {

@@ -6,10 +6,10 @@ import (
 )
 
 func TestLaunchdPlistRunsLightweightServeMode(t *testing.T) {
-	plist := launchdPlist("/Applications/MC Latency Monitor.app/Contents/MacOS/MC Latency Monitor", "/tmp/mc data", "/tmp/mc data/config.json")
+	plist := launchdPlist("/Applications/mcmon.app/Contents/MacOS/mcmon", "/tmp/mc data", "/tmp/mc data/config.json")
 
 	for _, want := range []string{
-		"<string>/Applications/MC Latency Monitor.app/Contents/MacOS/MC Latency Monitor</string>",
+		"<string>/Applications/mcmon.app/Contents/MacOS/mcmon</string>",
 		"<string>serve</string>",
 		"<string>-config</string>",
 		"<string>/tmp/mc data/config.json</string>",
@@ -22,10 +22,10 @@ func TestLaunchdPlistRunsLightweightServeMode(t *testing.T) {
 }
 
 func TestSystemdUnitRunsLightweightServeModeWithQuotedPaths(t *testing.T) {
-	unit := systemdUnit("/opt/MC Latency Monitor/mcmon", "/tmp/mc data", "/tmp/mc data/config.json")
+	unit := systemdUnit("/opt/mcmon/mcmon", "/tmp/mc data", "/tmp/mc data/config.json")
 
 	for _, want := range []string{
-		`ExecStart="/opt/MC Latency Monitor/mcmon" serve -config "/tmp/mc data/config.json"`,
+		`ExecStart="/opt/mcmon/mcmon" serve -config "/tmp/mc data/config.json"`,
 		`WorkingDirectory="/tmp/mc data"`,
 	} {
 		if !strings.Contains(unit, want) {
@@ -35,15 +35,15 @@ func TestSystemdUnitRunsLightweightServeModeWithQuotedPaths(t *testing.T) {
 }
 
 func TestWindowsTaskCommandRunsLightweightServeMode(t *testing.T) {
-	got := windowsTaskCommand(`C:\Program Files\MC Latency Monitor\mcmon.exe`, `C:\Users\YOUR_PATH_NAME\AppData\Roaming\mc-latency-monitor\config.json`)
-	want := `"C:\Program Files\MC Latency Monitor\mcmon.exe" serve -config "C:\Users\YOUR_PATH_NAME\AppData\Roaming\mc-latency-monitor\config.json"`
+	got := windowsTaskCommand(`C:\Program Files\mcmon\mcmon.exe`, `C:\Users\YOUR_PATH_NAME\AppData\Roaming\mcmon\config.json`)
+	want := `"C:\Program Files\mcmon\mcmon.exe" serve -config "C:\Users\YOUR_PATH_NAME\AppData\Roaming\mcmon\config.json"`
 	if got != want {
 		t.Fatalf("windows task command = %q, want %q", got, want)
 	}
 }
 
 func TestWindowsTaskArgsDoNotRequireAdministrator(t *testing.T) {
-	args := windowsTaskArgs(`C:\Apps\mcmon.exe`, `C:\Users\YOUR_PATH_NAME\AppData\Roaming\mc-latency-monitor\config.json`)
+	args := windowsTaskArgs(`C:\Apps\mcmon.exe`, `C:\Users\YOUR_PATH_NAME\AppData\Roaming\mcmon\config.json`)
 	for _, arg := range args {
 		if arg == "/RL" || arg == "HIGHEST" {
 			t.Fatalf("scheduled task args should not request highest privileges: %#v", args)

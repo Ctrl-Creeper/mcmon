@@ -196,7 +196,7 @@ func installSystemd(exe, wd, configPath string) error {
 
 func systemdUnit(exe, wd, configPath string) string {
 	return fmt.Sprintf(`[Unit]
-Description=Minecraft latency monitor
+Description=mcmon desktop monitor
 
 [Service]
 ExecStart=%s serve -config %s
@@ -224,7 +224,7 @@ func uninstallSystemd() error {
 
 // --- Windows: Scheduled Task running at logon ---
 
-const windowsTaskName = "McLatencyMonitor"
+const windowsTaskName = "mcmon"
 
 func installWindowsTask(exe, configPath string) error {
 	args := windowsTaskArgs(exe, configPath)

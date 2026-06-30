@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/YOUR_PATH/mc-latency-monitor/internal/app"
+	"github.com/Ctrl-Creeper/mcmon/internal/app"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -56,7 +56,7 @@ func main() {
 
 	desktop := &DesktopApp{}
 	err = wails.Run(&options.App{
-		Title:             "MC Server Monitor",
+		Title:             "mcmon",
 		Width:             1180,
 		Height:            820,
 		MinWidth:          900,
@@ -90,7 +90,7 @@ func parseDesktopCommand(args []string) desktopCommand {
 		log.Fatal(err)
 	}
 	if len(args) > 0 && args[0] == "serve" {
-		fs := flag.NewFlagSet("MC Server Monitor serve", flag.ExitOnError)
+		fs := flag.NewFlagSet("mcmon serve", flag.ExitOnError)
 		configPath := fs.String("config", defaultConfigPath, "path to config file")
 		fs.Parse(args[1:])
 		return desktopCommand{mode: desktopModeServe, configPath: *configPath}
@@ -103,7 +103,7 @@ func desktopConfigPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	dir = filepath.Join(dir, "mc-latency-monitor")
+	dir = filepath.Join(dir, "mcmon")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", err
 	}

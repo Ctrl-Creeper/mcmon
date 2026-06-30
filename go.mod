@@ -1,4 +1,4 @@
-module github.com/YOUR_PATH/mc-latency-monitor
+module github.com/Ctrl-Creeper/mcmon
 
 go 1.25.4
 

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/YOUR_PATH/mc-latency-monitor/internal/store"
+	"github.com/Ctrl-Creeper/mcmon/internal/store"
 )
 
 //go:embed static

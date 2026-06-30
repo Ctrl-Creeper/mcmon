@@ -30,7 +30,7 @@ jobs:
       - run: ./scripts/build-desktop.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: mc-latency-monitor-macos-arm64
+          name: mcmon-macos-arm64
           path: build/bin/*.app
 
   build-windows:
@@ -48,7 +48,7 @@ jobs:
         shell: pwsh
       - uses: actions/upload-artifact@v4
         with:
-          name: mc-latency-monitor-windows-amd64
+          name: mcmon-windows-amd64
           path: build/bin/*
 
   build-linux:
@@ -68,5 +68,5 @@ jobs:
       - run: ./scripts/build-desktop.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: mc-latency-monitor-linux-amd64
+          name: mcmon-linux-amd64
           path: build/bin/*
