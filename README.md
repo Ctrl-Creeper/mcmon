@@ -11,7 +11,7 @@ after the window is closed.
 
 This desktop app is the standalone/local member of the mcmon project family.
 
-- `mcmon`: this app. Use it when you want a local desktop monitor
+- [mcmon](https://github.com/Ctrl-Creeper/mcmon): this app. Use it when you want a local desktop monitor
   that works without any server.
 - [mcmon-host](https://github.com/Ctrl-Creeper/mcmon-host): Linux-only central dashboard and API for managed monitoring.
   It configures nodes and generates one-line `mcmon-agent` install commands.
