@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"log"
+	"math"
 	"sort"
 	"sync"
 	"time"
@@ -35,8 +36,19 @@ func (m *Manager) Sync(targets []Target) {
 }
 
 func (m *Manager) Start(t Target) {
-	m.Stop(t.ID)
 	t = t.normalized()
+
+	// Hold the mutex across stop-old + register-new so two concurrent
+	// Start calls for the same target can't both pass the Stop check,
+	// both spawn loops, and then have the second assignment overwrite
+	// the first — orphaning the first set of goroutines.
+	m.mu.Lock()
+	if old := m.stops[t.ID]; old != nil {
+		for _, stop := range old {
+			close(stop)
+		}
+		delete(m.stops, t.ID)
+	}
 
 	var stops []chan struct{}
 	add := func(metric string, interval int, fn func()) {
@@ -58,7 +70,6 @@ func (m *Manager) Start(t Target) {
 		add(MetricLoss, t.Monitors.Loss.IntervalSec, func() { runLossOnce(m.st, t) })
 	}
 
-	m.mu.Lock()
 	m.stops[t.ID] = stops
 	m.mu.Unlock()
 }
@@ -187,12 +198,32 @@ func runProbeBurst(t Target, mon ProbeMonitor) probeBurstResult {
 		sort.Float64s(vals)
 		min := vals[0]
 		max := vals[len(vals)-1]
-		p50 := vals[(len(vals)-1)/2]
+		p50 := percentile(vals, 0.5)
 		out.Min = &min
 		out.P50 = &p50
 		out.Max = &max
 	}
 	return out
+}
+
+// percentile returns the linear-interpolated p-th percentile of a sorted
+// slice. Matches the agent's percentile() so app-local and agent-collected
+// numbers are directly comparable.
+func percentile(sorted []float64, p float64) float64 {
+	if len(sorted) == 0 {
+		return 0
+	}
+	if len(sorted) == 1 {
+		return sorted[0]
+	}
+	idx := p * float64(len(sorted)-1)
+	lower := int(math.Floor(idx))
+	upper := int(math.Ceil(idx))
+	if lower == upper {
+		return sorted[lower]
+	}
+	frac := idx - float64(lower)
+	return sorted[lower]*(1-frac) + sorted[upper]*frac
 }
 
 func timeoutFor(t Target) time.Duration {

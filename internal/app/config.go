@@ -320,5 +320,20 @@ func writeConfig(path string, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0600)
+	return atomicWriteFile(path, b, 0600)
+}
+
+// atomicWriteFile writes data to path via a sibling .tmp file then renames
+// it into place, so a crash or full disk leaves either the old content or
+// the new — never an empty/partial config.
+func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, mode); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return nil
 }

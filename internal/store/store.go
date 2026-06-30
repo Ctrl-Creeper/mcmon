@@ -8,6 +8,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// maxSeriesRows caps a single series query so a long range can't OOM the
+// JSON encoder or the browser. ~50k samples is plenty for any visible chart.
+const maxSeriesRows = 50000
+
 type Sample struct {
 	TargetID string
 	Ts       int64 // unix seconds
@@ -82,8 +86,10 @@ func (s *Store) InsertMetric(sm MetricSample) error {
 
 func (s *Store) Series(targetID string, sinceTs int64) ([]Sample, error) {
 	rows, err := s.db.Query(
-		`SELECT target_id, ts, min_ms, p50_ms, max_ms, loss FROM samples WHERE target_id=? AND ts>=? ORDER BY ts ASC`,
-		targetID, sinceTs,
+		`SELECT target_id, ts, min_ms, p50_ms, max_ms, loss FROM samples
+		 WHERE target_id=? AND ts>=?
+		 ORDER BY ts DESC LIMIT ?`,
+		targetID, sinceTs, maxSeriesRows,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query series: %w", err)
@@ -98,13 +104,19 @@ func (s *Store) Series(targetID string, sinceTs int64) ([]Sample, error) {
 		}
 		out = append(out, sm)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	reverseSamples(out)
+	return out, nil
 }
 
 func (s *Store) MetricSeries(targetID, metric string, sinceTs int64) ([]MetricSample, error) {
 	rows, err := s.db.Query(
-		`SELECT target_id, metric, ts, value, extra FROM metric_samples WHERE target_id=? AND metric=? AND ts>=? ORDER BY ts ASC`,
-		targetID, metric, sinceTs,
+		`SELECT target_id, metric, ts, value, extra FROM metric_samples
+		 WHERE target_id=? AND metric=? AND ts>=?
+		 ORDER BY ts DESC LIMIT ?`,
+		targetID, metric, sinceTs, maxSeriesRows,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query metric series: %w", err)
@@ -119,5 +131,21 @@ func (s *Store) MetricSeries(targetID, metric string, sinceTs int64) ([]MetricSa
 		}
 		out = append(out, sm)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	reverseMetricSamples(out)
+	return out, nil
+}
+
+func reverseSamples(s []Sample) {
+	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
+		s[i], s[j] = s[j], s[i]
+	}
+}
+
+func reverseMetricSamples(s []MetricSample) {
+	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
+		s[i], s[j] = s[j], s[i]
+	}
 }
