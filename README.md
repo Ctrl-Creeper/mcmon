@@ -1,5 +1,7 @@
 # mcmon
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 mcmon is a lightweight desktop monitor for Minecraft Java Edition
 servers. It probes servers with the vanilla status/ping protocol, stores
 server status history in SQLite, and shows the data in a bundled desktop UI.

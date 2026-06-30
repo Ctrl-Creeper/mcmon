@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Servers - mcmon</title>
 <link rel="stylesheet" href="/style.css" />
+<script src="/i18n.js" defer></script>
 </head>
 <body>
 
@@ -169,6 +170,7 @@ function renderTable() {
   tbody.querySelectorAll('[data-del]').forEach(b => b.onclick = () => deleteTarget(b.dataset.del));
   document.getElementById('selectAll').checked = targetsCache.length > 0 && selected.size === targetsCache.length;
   updateSelectInfo();
+  window.mcmonI18n?.apply();
 }
 
 function statusClass(t) {
@@ -231,6 +233,7 @@ function fillForm(id) {
   document.getElementById('formErr').textContent = '';
   document.getElementById('formOk').textContent = '';
   document.getElementById('formCard').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  window.mcmonI18n?.apply();
 }
 
 function resetForm() {
@@ -243,6 +246,7 @@ function resetForm() {
   document.getElementById('f_cancel').style.display = 'none';
   document.getElementById('formErr').textContent = '';
   document.getElementById('formOk').textContent = '';
+  window.mcmonI18n?.apply();
 }
 
 function setMonitorForm(m) {
@@ -387,6 +391,7 @@ function renderImportModal() {
     document.getElementById('importSelectAll').checked = importSelected.size === importData.length;
   });
   document.getElementById('importSelectAll').checked = true;
+  window.mcmonI18n?.apply();
   document.getElementById('importErr').textContent = '';
 }
 

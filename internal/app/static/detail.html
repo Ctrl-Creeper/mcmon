@@ -21,6 +21,7 @@
   .metric-card .big { font-size: 28px; font-weight: 750; margin-bottom: 10px; }
   .metric-card canvas { height: 92px !important; }
 </style>
+<script src="/i18n.js" defer></script>
 </head>
 <body>
 
@@ -121,6 +122,7 @@ async function loadTarget() {
   document.getElementById('serverName').textContent = targetInfo.name || targetInfo.id;
   document.getElementById('serverHost').textContent = `${targetInfo.host}:${targetInfo.port}`;
   document.getElementById('serverConfig').textContent = `Timeout: ${targetInfo.timeout_ms}ms`;
+  window.mcmonI18n?.apply();
 }
 
 function monitorDefaults(t) {
@@ -167,6 +169,7 @@ async function renderOverview() {
   grid.querySelectorAll('[data-metric]').forEach(card => {
     card.onclick = () => { location.href = `/detail.html?id=${encodeURIComponent(targetId)}&metric=${card.dataset.metric}`; };
   });
+  window.mcmonI18n?.apply();
 }
 
 function metricCardHTML(metric) {

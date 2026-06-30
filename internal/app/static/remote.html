@@ -20,6 +20,7 @@
   .config-form input[type=text],
   .config-form input[type=password] { width: 100%; }
 </style>
+<script src="/i18n.js" defer></script>
 </head>
 <body>
 
@@ -216,6 +217,7 @@ async function loadRemote() {
     if (targetList.length === 0) {
       grid.innerHTML = '<div class="muted" style="padding:24px;text-align:center;">No servers being monitored on the remote host.</div>';
     }
+    window.mcmonI18n?.apply();
   } catch (e) {
     console.error('loadRemote:', e);
     connStatus.innerHTML = '<span class="err">Remote refresh failed: ' + esc(e.message) + '</span>';

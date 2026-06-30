@@ -22,6 +22,7 @@
   .empty-state a { color: var(--accent); }
   @media (max-width: 560px) { .server-grid, .metric-strip { grid-template-columns: 1fr; } }
 </style>
+<script src="/i18n.js" defer></script>
 </head>
 <body>
 
@@ -137,6 +138,7 @@ function renderAll() {
   if (!targets.length) {
     grid.innerHTML = '';
     empty.style.display = '';
+    window.mcmonI18n?.apply();
     return;
   }
   empty.style.display = 'none';
@@ -160,6 +162,7 @@ function renderAll() {
     grid.appendChild(card);
     enabledMetrics(t).forEach(metric => renderSpark(t.id, metric));
   });
+  window.mcmonI18n?.apply();
 }
 
 function metricTileHTML(t, metric) {

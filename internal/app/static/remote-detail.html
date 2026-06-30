@@ -12,6 +12,7 @@
   .back-link { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); text-decoration: none; font-size: 13px; margin-bottom: 16px; transition: color 0.2s; }
   .back-link:hover { color: var(--accent); }
 </style>
+<script src="/i18n.js" defer></script>
 </head>
 <body>
 
@@ -122,6 +123,7 @@ async function loadTarget() {
   document.getElementById('serverHost').textContent = target.host + ':' + target.port;
   document.getElementById('agentInfo').textContent = 'Agent: ' + (agent ? agent.name : agentId) + (agent && agent.online ? ' (online)' : ' (offline)');
   document.getElementById('statusDot').className = 'dot ' + (agent && agent.online ? 'online' : 'offline');
+  window.mcmonI18n?.apply();
 }
 
 function renderRangeButtons() {
@@ -166,6 +168,7 @@ async function refresh() {
   lossEl.className = 'stat-value ' + (avgLoss < 1 ? 'green' : avgLoss < 10 ? '' : 'red');
 
   document.getElementById('statSamples').textContent = arr.length;
+  window.mcmonI18n?.apply();
 
   const labels = arr.map(d => new Date(d.ts * 1000).toLocaleString());
   const minD = arr.map(d => d.min_ms);
