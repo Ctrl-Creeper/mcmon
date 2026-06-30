@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/Ctrl-Creeper/mcmon/internal/store"
 )
@@ -60,7 +61,12 @@ func RunServer(ctx context.Context, configPath string) error {
 	defer rt.Close()
 
 	addr := rt.Config.Snapshot().ListenAddr
-	srv := &http.Server{Addr: addr, Handler: rt.Handler}
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           rt.Handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 	go func() {
 		<-ctx.Done()
 		_ = srv.Shutdown(context.Background())

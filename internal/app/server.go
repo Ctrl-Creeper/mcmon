@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -222,6 +223,10 @@ func newMux(st *store.Store, cs *ConfigStore, mgr *Manager, configPath string) *
 	})
 
 	mux.HandleFunc("/api/remote/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		hostURL, adminToken := cs.RemoteConfig()
 		if hostURL == "" {
 			http.Error(w, "no remote host configured", http.StatusBadRequest)
@@ -245,7 +250,7 @@ func newMux(st *store.Store, cs *ConfigStore, mgr *Manager, configPath string) *
 		if adminToken != "" {
 			req.Header.Set("Authorization", "Bearer "+adminToken)
 		}
-		client := &http.Client{Timeout: 10 * time.Second}
+		client := &http.Client{Timeout: 10 * time.Second, Transport: safeProxyTransport()}
 		resp, err := client.Do(req)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("proxy error: %v", err), http.StatusBadGateway)
@@ -254,10 +259,35 @@ func newMux(st *store.Store, cs *ConfigStore, mgr *Manager, configPath string) *
 		defer resp.Body.Close()
 		w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
 		w.WriteHeader(resp.StatusCode)
-		io.Copy(w, resp.Body)
+		io.Copy(w, http.MaxBytesReader(w, resp.Body, 16<<20))
 	})
 
 	return mux
+}
+
+// safeProxyTransport returns an HTTP transport that refuses to dial
+// loopback, link-local, multicast, unspecified, or RFC1918 private
+// addresses — protecting the remote-host proxy from SSRF.
+func safeProxyTransport() *http.Transport {
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	return &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+			if err != nil {
+				return nil, err
+			}
+			for _, ip := range ips {
+				if isBlockedRemoteIP(ip.IP) {
+					return nil, fmt.Errorf("blocked address: %s resolves to %s", host, ip.IP)
+				}
+			}
+			return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+		},
+	}
 }
 
 func normalizeRemoteHost(raw string) (string, error) {
@@ -285,8 +315,24 @@ func normalizeRemoteHost(raw string) (string, error) {
 	return strings.TrimRight(u.String(), "/"), nil
 }
 
+// isBlockedRemoteIP rejects IPs that should never be reachable via the
+// remote-host proxy. Loopback (127/8, ::1) is intentionally permitted so
+// users can point the app at a host running on the same machine, but
+// private ranges, link-local (cloud metadata at 169.254.169.254), multicast,
+// and unspecified addresses are all refused.
 func isBlockedRemoteIP(ip net.IP) bool {
-	return ip.IsUnspecified() || ip.IsMulticast()
+	if ip == nil {
+		return true
+	}
+	if ip.IsLoopback() {
+		return false
+	}
+	if ip.IsUnspecified() || ip.IsMulticast() ||
+		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsPrivate() || ip.IsInterfaceLocalMulticast() {
+		return true
+	}
+	return false
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
