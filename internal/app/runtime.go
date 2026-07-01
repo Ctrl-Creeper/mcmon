@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"io/fs"
-	"log"
 	"net/http"
 	"time"
 
@@ -72,7 +71,6 @@ func RunServer(ctx context.Context, configPath string) error {
 		_ = srv.Shutdown(context.Background())
 	}()
 
-	log.Printf("mcmon listening on %s", addr)
 	err = srv.ListenAndServe()
 	if err == http.ErrServerClosed {
 		return nil
