@@ -127,8 +127,9 @@ mcmon 可以独立监控本地配置的服务器，也可以在 Remote 页面连
 Remote 设置支持：
 
 - Host URL。
-- 可选 admin token。
-- 转发 Bearer token 到 host API。
+- 管理员用户名/密码登录。
+- 可选 TOTP 2FA 验证码。
+- 登录后转发 session token 到 host API。
 
 未配置远程 Host 时，本地监控不受影响。
 

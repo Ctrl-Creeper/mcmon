@@ -33,14 +33,14 @@ func TestDefaultConfigBindsLocalhostForDesktopSafety(t *testing.T) {
 	if cfg.ListenAddr != "127.0.0.1:8090" {
 		t.Fatalf("ListenAddr = %q, want localhost bind", cfg.ListenAddr)
 	}
-	if cfg.RemoteHost != "" || cfg.RemoteAdminToken != "" {
-		t.Fatalf("remote config should default empty, got host=%q token=%q", cfg.RemoteHost, cfg.RemoteAdminToken)
+	if cfg.RemoteHost != "" || cfg.RemoteSessionToken != "" {
+		t.Fatalf("remote config should default empty, got host=%q session=%q", cfg.RemoteHost, cfg.RemoteSessionToken)
 	}
 }
 
-func TestRemoteConfigStoresOptionalAdminToken(t *testing.T) {
+func TestRemoteConfigStoresHostAndUsernameOnly(t *testing.T) {
 	_, mux := newTestMux(t, defaultConfig())
-	body := strings.NewReader(`{"host_url":"http://host.example:9090","admin_token":"admin-secret"}`)
+	body := strings.NewReader(`{"host_url":"http://host.example:9090","username":"admin"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/remote/config", body)
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -60,14 +60,22 @@ func TestRemoteConfigStoresOptionalAdminToken(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got["host_url"] != "http://host.example:9090" || got["admin_token"] != "admin-secret" {
+	if got["host_url"] != "http://host.example:9090" || got["username"] != "admin" || got["session_token"] != "" {
 		t.Fatalf("remote config = %#v", got)
 	}
 }
 
-func TestRemoteProxyForwardsAdminBearerToken(t *testing.T) {
+func TestRemoteLoginStoresSessionAndProxyForwardsBearerToken(t *testing.T) {
 	var gotAuth string
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/auth/login" {
+			if r.Method != http.MethodPost {
+				t.Errorf("login method = %s", r.Method)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"session_token":"session-secret","expires_at":9999999999,"username":"admin","totp_enabled":false}`))
+			return
+		}
 		gotAuth = r.Header.Get("Authorization")
 		if r.URL.Path != "/api/agents" {
 			t.Errorf("path = %q, want /api/agents", r.URL.Path)
@@ -78,24 +86,31 @@ func TestRemoteProxyForwardsAdminBearerToken(t *testing.T) {
 	defer remote.Close()
 
 	cfg := defaultConfig()
-	cfg.RemoteHost = remote.URL
-	cfg.RemoteAdminToken = "admin-secret"
 	_, mux := newTestMux(t, cfg)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/remote/agents", nil)
+	body := strings.NewReader(`{"host_url":"` + remote.URL + `","username":"admin","password":"secret-password"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/remote/login", body)
+	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("remote login = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/remote/agents", nil)
+	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("remote proxy = %d, want 200: %s", rr.Code, rr.Body.String())
 	}
-	if gotAuth != "Bearer admin-secret" {
-		t.Fatalf("Authorization = %q, want Bearer admin-secret", gotAuth)
+	if gotAuth != "Bearer session-secret" {
+		t.Fatalf("Authorization = %q, want Bearer session-secret", gotAuth)
 	}
 }
 
 func TestRemoteConfigRejectsUnsupportedURLScheme(t *testing.T) {
 	_, mux := newTestMux(t, defaultConfig())
-	body := strings.NewReader(`{"host_url":"file:///etc/passwd","admin_token":"admin-secret"}`)
+	body := strings.NewReader(`{"host_url":"file:///etc/passwd","username":"admin"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/remote/config", body)
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()

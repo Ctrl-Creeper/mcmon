@@ -43,10 +43,16 @@
     <label>Host URL
       <input type="text" id="hostUrl" placeholder="http://your-host:9090" />
     </label>
-    <label>Admin token
-      <input type="password" id="adminToken" placeholder="Optional for protected hosts" />
+    <label>Username
+      <input type="text" id="username" placeholder="admin" autocomplete="username" />
     </label>
-    <button class="btn primary" id="btnConnect">Connect</button>
+    <label>Password
+      <input type="password" id="password" placeholder="Host password" autocomplete="current-password" />
+    </label>
+    <label>2FA code
+      <input type="text" id="totpCode" placeholder="Optional" inputmode="numeric" autocomplete="one-time-code" />
+    </label>
+    <button class="btn primary" id="btnConnect">Login</button>
     <button class="btn danger" id="btnDisconnect" style="display:none">Disconnect</button>
   </div>
   <div id="connStatus" class="muted" style="margin-top:8px;"></div>
@@ -98,7 +104,9 @@ let refreshTimer = null;
 const miniCharts = {};
 
 const hostUrlInput = document.getElementById('hostUrl');
-const adminTokenInput = document.getElementById('adminToken');
+const usernameInput = document.getElementById('username');
+const passwordInput = document.getElementById('password');
+const totpInput = document.getElementById('totpCode');
 const btnConnect = document.getElementById('btnConnect');
 const btnDisconnect = document.getElementById('btnDisconnect');
 const connStatus = document.getElementById('connStatus');
@@ -108,36 +116,44 @@ async function init() {
   const resp = await fetch('/api/remote/config').then(r => r.json());
   if (resp.host_url) {
     hostUrlInput.value = resp.host_url;
-    adminTokenInput.value = resp.admin_token || '';
-    doConnect(resp.host_url);
+    usernameInput.value = resp.username || '';
+    if (resp.session_token) doConnect(resp.host_url);
   }
 }
 
 btnConnect.onclick = async () => {
   const url = hostUrlInput.value.trim();
-  const adminToken = adminTokenInput.value.trim();
+  const username = usernameInput.value.trim();
+  const password = passwordInput.value;
+  const totpCode = totpInput.value.trim();
   if (!url) {
     connStatus.innerHTML = '<span class="err">Enter a host URL first.</span>';
     return;
   }
-  const saved = await fetch('/api/remote/config', {
+  if (!username || !password) {
+    connStatus.innerHTML = '<span class="err">Enter username and password.</span>';
+    return;
+  }
+  const saved = await fetch('/api/remote/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ host_url: url, admin_token: adminToken }),
+    body: JSON.stringify({ host_url: url, username, password, totp_code: totpCode }),
   });
   if (!saved.ok) {
     connStatus.innerHTML = '<span class="err">' + esc(await saved.text()) + '</span>';
     return;
   }
   const cfg = await saved.json();
-  doConnect(cfg.host_url);
+  passwordInput.value = '';
+  totpInput.value = '';
+  doConnect(url);
 };
 
 btnDisconnect.onclick = async () => {
   await fetch('/api/remote/config', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ host_url: '', admin_token: '' }),
+    body: JSON.stringify({ host_url: '', username: '' }),
   });
   connected = false;
   if (refreshTimer) clearInterval(refreshTimer);
@@ -145,8 +161,11 @@ btnDisconnect.onclick = async () => {
   btnDisconnect.style.display = 'none';
   btnConnect.style.display = '';
   hostUrlInput.disabled = false;
-  adminTokenInput.disabled = false;
-  adminTokenInput.value = '';
+  usernameInput.disabled = false;
+  passwordInput.disabled = false;
+  totpInput.disabled = false;
+  passwordInput.value = '';
+  totpInput.value = '';
   connStatus.textContent = 'Disconnected.';
   connStatus.className = 'muted';
 };
@@ -161,14 +180,16 @@ async function doConnect(url) {
     connected = true;
     connStatus.innerHTML = '<span class="ok">Connected to ' + esc(url) + '</span>';
     hostUrlInput.disabled = true;
-    adminTokenInput.disabled = true;
+    usernameInput.disabled = true;
+    passwordInput.disabled = true;
+    totpInput.disabled = true;
     btnConnect.style.display = 'none';
     btnDisconnect.style.display = '';
     remoteContent.style.display = '';
     loadRemote();
     refreshTimer = setInterval(loadRemote, 30000);
   } catch (e) {
-    connStatus.innerHTML = '<span class="err">Failed: ' + esc(e.message) + '. Check the host URL and admin token.</span>';
+    connStatus.innerHTML = '<span class="err">Failed: ' + esc(e.message) + '. Check the host URL and login credentials.</span>';
   }
 }
 

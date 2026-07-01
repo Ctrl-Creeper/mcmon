@@ -192,18 +192,18 @@ func newMux(st *store.Store, cs *ConfigStore, mgr *Manager, configPath string) *
 	mux.HandleFunc("/api/remote/config", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			hostURL, adminToken := cs.RemoteConfig()
-			writeJSON(w, map[string]string{"host_url": hostURL, "admin_token": adminToken})
+			hostURL, username, sessionToken := cs.RemoteConfig()
+			writeJSON(w, map[string]string{"host_url": hostURL, "username": username, "session_token": sessionToken})
 		case http.MethodPost:
 			var body struct {
-				HostURL    string `json:"host_url"`
-				AdminToken string `json:"admin_token"`
+				HostURL  string `json:"host_url"`
+				Username string `json:"username"`
 			}
 			if !decodeJSON(w, r, &body) {
 				return
 			}
 			hostURL := strings.TrimSpace(body.HostURL)
-			adminToken := strings.TrimSpace(body.AdminToken)
+			username := strings.TrimSpace(body.Username)
 			if hostURL != "" {
 				normalized, err := normalizeRemoteHost(hostURL)
 				if err != nil {
@@ -212,14 +212,88 @@ func newMux(st *store.Store, cs *ConfigStore, mgr *Manager, configPath string) *
 				}
 				hostURL = normalized
 			}
-			if err := cs.SetRemoteConfig(hostURL, adminToken); err != nil {
+			if err := cs.SetRemoteConfig(hostURL, username, ""); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			writeJSON(w, map[string]string{"host_url": hostURL, "admin_token": adminToken})
+			writeJSON(w, map[string]string{"host_url": hostURL, "username": username, "session_token": ""})
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
+	})
+
+	mux.HandleFunc("/api/remote/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var body struct {
+			HostURL  string `json:"host_url"`
+			Username string `json:"username"`
+			Password string `json:"password"`
+			TOTPCode string `json:"totp_code"`
+		}
+		if !decodeJSON(w, r, &body) {
+			return
+		}
+		hostURL, err := normalizeRemoteHost(body.HostURL)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		loginBody := map[string]string{
+			"username": strings.TrimSpace(body.Username),
+			"password": body.Password,
+		}
+		if strings.TrimSpace(body.TOTPCode) != "" {
+			loginBody["totp_code"] = strings.TrimSpace(body.TOTPCode)
+		}
+		payload, err := json.Marshal(loginBody)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		req, err := http.NewRequest(http.MethodPost, hostURL+"/api/auth/login", strings.NewReader(string(payload)))
+		if err != nil {
+			http.Error(w, fmt.Sprintf("login error: %v", err), http.StatusBadGateway)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		client := &http.Client{Timeout: 10 * time.Second, Transport: safeProxyTransport()}
+		resp, err := client.Do(req)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("login error: %v", err), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(http.MaxBytesReader(w, resp.Body, 1<<20))
+			http.Error(w, strings.TrimSpace(string(body)), resp.StatusCode)
+			return
+		}
+		var loginResp struct {
+			SessionToken string `json:"session_token"`
+			Username     string `json:"username"`
+			ExpiresAt    int64  `json:"expires_at"`
+			TOTPEnabled  bool   `json:"totp_enabled"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, resp.Body, 1<<20)).Decode(&loginResp); err != nil {
+			http.Error(w, "invalid host login response: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		if loginResp.SessionToken == "" {
+			http.Error(w, "host login response did not include session token", http.StatusBadGateway)
+			return
+		}
+		username := loginResp.Username
+		if username == "" {
+			username = strings.TrimSpace(body.Username)
+		}
+		if err := cs.SetRemoteConfig(hostURL, username, loginResp.SessionToken); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, loginResp)
 	})
 
 	mux.HandleFunc("/api/remote/", func(w http.ResponseWriter, r *http.Request) {
@@ -227,7 +301,7 @@ func newMux(st *store.Store, cs *ConfigStore, mgr *Manager, configPath string) *
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		hostURL, adminToken := cs.RemoteConfig()
+		hostURL, _, sessionToken := cs.RemoteConfig()
 		if hostURL == "" {
 			http.Error(w, "no remote host configured", http.StatusBadRequest)
 			return
@@ -247,8 +321,8 @@ func newMux(st *store.Store, cs *ConfigStore, mgr *Manager, configPath string) *
 			http.Error(w, fmt.Sprintf("proxy error: %v", err), http.StatusBadGateway)
 			return
 		}
-		if adminToken != "" {
-			req.Header.Set("Authorization", "Bearer "+adminToken)
+		if sessionToken != "" {
+			req.Header.Set("Authorization", "Bearer "+sessionToken)
 		}
 		client := &http.Client{Timeout: 10 * time.Second, Transport: safeProxyTransport()}
 		resp, err := client.Do(req)

@@ -189,8 +189,9 @@ instance from the Remote view.
 Remote settings support:
 
 - Host URL.
-- Optional admin token.
-- Bearer token forwarding to the host API.
+- Admin username/password login.
+- Optional TOTP 2FA code.
+- Session-token forwarding to the host API after login.
 
 If no remote host is configured, local monitoring continues to work normally.
 

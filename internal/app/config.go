@@ -152,11 +152,12 @@ func (t Target) validate() error {
 }
 
 type Config struct {
-	ListenAddr       string   `json:"listen_addr"`
-	DBPath           string   `json:"db_path"`
-	RemoteHost       string   `json:"remote_host,omitempty"`
-	RemoteAdminToken string   `json:"remote_admin_token,omitempty"`
-	Targets          []Target `json:"targets"`
+	ListenAddr         string   `json:"listen_addr"`
+	DBPath             string   `json:"db_path"`
+	RemoteHost         string   `json:"remote_host,omitempty"`
+	RemoteUsername     string   `json:"remote_username,omitempty"`
+	RemoteSessionToken string   `json:"remote_session_token,omitempty"`
+	Targets            []Target `json:"targets"`
 }
 
 func defaultConfig() Config {
@@ -282,17 +283,18 @@ func (c *ConfigStore) RemoteHost() string {
 	return c.cfg.RemoteHost
 }
 
-func (c *ConfigStore) RemoteConfig() (hostURL, adminToken string) {
+func (c *ConfigStore) RemoteConfig() (hostURL, username, sessionToken string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.cfg.RemoteHost, c.cfg.RemoteAdminToken
+	return c.cfg.RemoteHost, c.cfg.RemoteUsername, c.cfg.RemoteSessionToken
 }
 
-func (c *ConfigStore) SetRemoteConfig(hostURL, adminToken string) error {
+func (c *ConfigStore) SetRemoteConfig(hostURL, username, sessionToken string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.cfg.RemoteHost = hostURL
-	c.cfg.RemoteAdminToken = adminToken
+	c.cfg.RemoteUsername = username
+	c.cfg.RemoteSessionToken = sessionToken
 	return writeConfig(c.path, c.cfg)
 }
 
