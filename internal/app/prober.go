@@ -63,11 +63,15 @@ func (m *Manager) Start(t Target) {
 	if t.Monitors.Players.Enabled {
 		add(MetricPlayers, t.Monitors.Players.IntervalSec, func() { runPlayersOnce(m.st, t) })
 	}
-	if t.Monitors.Latency.Enabled {
-		add(MetricLatency, t.Monitors.Latency.IntervalSec, func() { runLatencyOnce(m.st, t) })
-	}
-	if t.Monitors.Loss.Enabled {
-		add(MetricLoss, t.Monitors.Loss.IntervalSec, func() { runLossOnce(m.st, t) })
+	if canShareLatencyLoss(t) {
+		add(MetricLatency+"-"+MetricLoss, t.Monitors.Latency.IntervalSec, func() { runLatencyAndLossOnce(m.st, t) })
+	} else {
+		if t.Monitors.Latency.Enabled {
+			add(MetricLatency, t.Monitors.Latency.IntervalSec, func() { runLatencyOnce(m.st, t) })
+		}
+		if t.Monitors.Loss.Enabled {
+			add(MetricLoss, t.Monitors.Loss.IntervalSec, func() { runLossOnce(m.st, t) })
+		}
 	}
 
 	m.stops[t.ID] = stops
@@ -139,6 +143,23 @@ func runPlayersOnce(st *store.Store, t Target) {
 func runLatencyOnce(st *store.Store, t Target) {
 	result := runProbeBurst(t, t.Monitors.Latency)
 	ts := time.Now().Unix()
+	storeLatencyResult(st, t, result, ts)
+}
+
+func runLossOnce(st *store.Store, t Target) {
+	result := runProbeBurst(t, t.Monitors.Loss)
+	ts := time.Now().Unix()
+	storeLossResult(st, t, result, ts)
+}
+
+func runLatencyAndLossOnce(st *store.Store, t Target) {
+	result := runProbeBurst(t, t.Monitors.Latency)
+	ts := time.Now().Unix()
+	storeLatencyResult(st, t, result, ts)
+	storeLossResult(st, t, result, ts)
+}
+
+func storeLatencyResult(st *store.Store, t Target, result probeBurstResult, ts int64) {
 	insertLegacySample(st, t.ID, ts, result)
 
 	extra := latencyExtra(result)
@@ -151,13 +172,31 @@ func runLatencyOnce(st *store.Store, t Target) {
 	}
 }
 
-func runLossOnce(st *store.Store, t Target) {
-	result := runProbeBurst(t, t.Monitors.Loss)
-	ts := time.Now().Unix()
+func storeLossResult(st *store.Store, t Target, result probeBurstResult, ts int64) {
 	value := result.LossPct
 	if err := st.InsertMetric(store.MetricSample{TargetID: t.ID, Metric: MetricLoss, Ts: ts, Value: &value}); err != nil {
 		log.Printf("store loss failed for %s: %v", t.ID, err)
 	}
+}
+
+func canShareLatencyLoss(t Target) bool {
+	latency := t.Monitors.Latency
+	loss := t.Monitors.Loss
+	return latency.Enabled && loss.Enabled &&
+		latency.IntervalSec == loss.IntervalSec &&
+		latency.ProbesPerBurst == loss.ProbesPerBurst &&
+		latency.ProbeGapMs == loss.ProbeGapMs &&
+		effectiveProbeProtocol(t, latency) == effectiveProbeProtocol(t, loss)
+}
+
+func effectiveProbeProtocol(t Target, mon ProbeMonitor) int {
+	if mon.ProtocolVersion > 0 {
+		return mon.ProtocolVersion
+	}
+	if t.ProtocolVersion > 0 {
+		return t.ProtocolVersion
+	}
+	return defaultProtocolVersion
 }
 
 type probeBurstResult struct {
@@ -176,7 +215,7 @@ func runProbeBurst(t Target, mon ProbeMonitor) probeBurstResult {
 	gap := time.Duration(mon.ProbeGapMs) * time.Millisecond
 	proto := mon.ProtocolVersion
 	if proto == 0 {
-		proto = defaultProtocolVersion
+		proto = effectiveProbeProtocol(t, mon)
 	}
 
 	var vals []float64

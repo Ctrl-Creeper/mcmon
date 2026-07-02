@@ -28,3 +28,41 @@ func TestLegacyTargetGetsDefaultMonitors(t *testing.T) {
 		t.Fatalf("loss monitor did not inherit legacy burst settings: %#v", tgt.Monitors.Loss)
 	}
 }
+
+func TestCanShareLatencyLossProbeBurst(t *testing.T) {
+	tgt := Target{
+		ID: "srv", Host: "mc.example.com",
+		Monitors: Monitors{
+			Latency: ProbeMonitor{Enabled: true},
+			Loss:    ProbeMonitor{Enabled: true},
+		},
+	}.normalized()
+
+	if !canShareLatencyLoss(tgt) {
+		t.Fatalf("matching latency/loss monitors should share a probe burst: %#v", tgt.Monitors)
+	}
+
+	tgt.Monitors.Loss.ProbeGapMs += 100
+	if canShareLatencyLoss(tgt) {
+		t.Fatal("different probe gaps must not share a probe burst")
+	}
+}
+
+func TestCanShareLatencyLossUsesEffectiveProtocol(t *testing.T) {
+	tgt := Target{
+		ID: "srv", Host: "mc.example.com", ProtocolVersion: 765,
+		Monitors: Monitors{
+			Latency: ProbeMonitor{Enabled: true, ProtocolVersion: 765},
+			Loss:    ProbeMonitor{Enabled: true},
+		},
+	}.normalized()
+
+	if !canShareLatencyLoss(tgt) {
+		t.Fatalf("loss monitor without explicit protocol should inherit target protocol: %#v", tgt.Monitors)
+	}
+
+	tgt.Monitors.Loss.ProtocolVersion = defaultProtocolVersion
+	if canShareLatencyLoss(tgt) {
+		t.Fatal("different effective protocol versions must not share a probe burst")
+	}
+}
